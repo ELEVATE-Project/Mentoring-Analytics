@@ -1,0 +1,63 @@
+[MONGO]
+
+# --------------
+# Mongo  url
+#---------------
+
+mongo_url = mongodb://{{mongodb_ip:port_no}}
+
+# -----------------------
+# Mongo database name
+# -----------------------
+
+user_database_name = {{users_db_name}}
+
+mentoring_database_name = {{mentoring_db_name}}
+
+# -------------------
+# Mongo Collections
+# -------------------
+
+users_collection = {{users_collection_name}}
+
+session_attendees_collection = {{session_attendees_collection_name}}
+
+sessions_collection = {{session_collection_name}}}
+
+[LOGS]
+
+user_session_success = {{user_session_report_log_folder_path}}/success.log 
+
+user_session_error = {{user_session_report_log_folder_path}}/error.log
+
+[S3]
+
+base_path = s3a://{{S3_bucket_name}}/base_folder
+
+aws_access_key = {{S3_access_key}}
+
+aws_secret_key = {{S3_secret_key}}
+
+df_aws_region = {{S3_region_for_spark}}
+
+aws_region = {{S3_region_for_boto3}}
+
+bucket_name = {{S3_bucket_name}}
+
+mentor_user_path = ${base_path}/{{mentor_user_folder}}/
+
+mentee_user_path = ${base_path}/{{mentee_user_folder}}/
+
+session_path = ${base_path}/{{session_folder}}/
+
+[KAFKA]
+
+kafka_url = {{kafka_ip:port_no}}
+
+notification_kafka_topic_name = {{notifications_kafka_topic_name}}
+
+[EMAIL]
+
+to = {{multiple_to_email_address_by_comma}}
+
+cc = {{multiple_cc_email_address_by_comma}}

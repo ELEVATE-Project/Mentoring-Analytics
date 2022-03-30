@@ -1,0 +1,366 @@
+import json,os,sys
+from configparser import ConfigParser,ExtendedInterpolation
+from pymongo import MongoClient
+from bson.objectid import ObjectId
+import logging
+import logging.handlers
+from logging.handlers import TimedRotatingFileHandler
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import *
+import pyspark.sql.functions as F
+from pyspark.sql.types import *
+from pyspark.sql import Row
+from pyspark.sql.functions import array, col, explode, lit, struct
+from pyspark.sql import DataFrame
+from typing import Iterable 
+from functools import reduce
+from operator import add
+from pyspark import StorageLevel
+import boto3
+from kafka import KafkaConsumer, KafkaProducer
+from bson import json_util
+
+config_path = os.path.split(os.path.dirname(os.path.abspath(__file__)))
+config = ConfigParser(interpolation=ExtendedInterpolation())
+config.read(config_path[0] + "/config.ini")
+
+formatter = logging.Formatter('%(asctime)s - %(levelname)s')
+
+successLogger = logging.getLogger('success log')
+successLogger.setLevel(logging.DEBUG)
+
+# Add the log message handler to the logger
+successHandler = logging.handlers.RotatingFileHandler(
+    config.get('LOGS', 'user_session_success')
+)
+successBackuphandler = TimedRotatingFileHandler(
+    config.get('LOGS','user_session_success'),
+    when="w0",
+    backupCount=1
+)
+successHandler.setFormatter(formatter)
+successLogger.addHandler(successHandler)
+successLogger.addHandler(successBackuphandler)
+
+errorLogger = logging.getLogger('error log')
+errorLogger.setLevel(logging.ERROR)
+errorHandler = logging.handlers.RotatingFileHandler(
+    config.get('LOGS', 'user_session_error')
+)
+errorBackuphandler = TimedRotatingFileHandler(
+    config.get('LOGS', 'user_session_error'),
+    when="w0",
+    backupCount=1
+)
+errorHandler.setFormatter(formatter)
+errorLogger.addHandler(errorHandler)
+errorLogger.addHandler(errorBackuphandler)
+
+try:
+    def convert_to_row(d: dict) -> Row:
+        return Row(**OrderedDict(sorted(d.items())))
+except Exception as e:
+    errorLogger.error(e, exc_info=True)
+
+spark = SparkSession.builder.appName("user_reports").config(
+    "spark.driver.memory", "50g"
+).config(
+    "spark.executor.memory", "100g"
+).config(
+    "spark.memory.offHeap.enabled", True
+).config(
+    "spark.memory.offHeap.size", "32g"
+).getOrCreate()
+
+sc = spark.sparkContext
+
+spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "true")
+hadoop_conf = sc._jsc.hadoopConfiguration()
+hadoop_conf.set("fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+sc.setSystemProperty("com.amazonaws.services.s3.enableV4", "true")
+hadoop_conf.set("fs.s3a.endpoint", config.get("S3","df_aws_region"))
+hadoop_conf.set("fs.s3a.access.key", config.get("S3","aws_access_key"))
+hadoop_conf.set("fs.s3a.secret.key", config.get("S3","aws_secret_key"))
+hadoop_conf.set("fs.s3a.multiobjectdelete.enable","false")
+
+s3_presigned_client = boto3.client('s3', 
+                      aws_access_key_id=config.get("S3","aws_access_key"),
+                      aws_secret_access_key=config.get("S3","aws_secret_key"),
+                      region_name=config.get("S3","aws_region")
+                      )
+s3_client = boto3.resource("s3",
+         aws_access_key_id=config.get("S3","aws_access_key"),
+         aws_secret_access_key=config.get("S3","aws_secret_key"))
+s3_bucket = s3_client.Bucket(config.get("S3","bucket_name"))
+
+client = MongoClient(config.get('MONGO', 'mongo_url'))
+
+user_db = client[config.get('MONGO', 'user_database_name')]
+users_collec = user_db[config.get('MONGO', 'users_collection')]
+
+mentoring_db = client[config.get('MONGO','mentoring_database_name')]
+session_attendees_collec = mentoring_db[config.get('MONGO','session_attendees_collection')]
+sessions_collec = mentoring_db[config.get('MONGO','sessions_collection')]
+
+##Mentor User Report
+mentor_sessions_cursorMongo = sessions_collec.aggregate(
+        [{"$match": {"deleted": {"$exists":True,"$ne":None,"$eq":False}}},
+                 {
+                  "$project": {
+                          "_id": {"$toString": "$_id"},
+                          "userId": {"$toString": "$userId"},
+                          "status":1,
+                          "feedbacks":{"_id":{"$toString": "$_id"},"questionId":{"$toString": "$questionId"},"value":1,"label":1},
+                          "createdAt":1,
+                          "startDateUtc":1,
+                          "endDateUtc":1,
+                          "title":1,
+                          "recommendedFor":{"value":1,"label":1},
+                          "categories":{"value":1,"label":1},
+                          "medium":{"value":1,"label":1}
+                  }
+                 }
+         ])
+
+mentor_sessions_schema = StructType([
+        StructField("_id", StringType(), True),
+        StructField("userId", StringType(), True),
+        StructField("status",StringType(),True),
+        StructField("feedbacks",
+          ArrayType(
+            StructType([
+                        StructField("_id", StringType(), True),
+                        StructField("questionId", StringType(), True),
+                        StructField("value", StringType(), True),
+                        StructField("label", StringType(), True)
+                       ])
+        ), True),
+        StructField("createdAt",TimestampType(),True),
+        StructField("startDateUtc",StringType(),True),
+        StructField("endDateUtc",StringType(),True),
+        StructField("title",StringType(),True),
+        StructField("recommendedFor",
+          ArrayType(
+            StructType([
+                        StructField("value", StringType(), True),
+                        StructField("label", StringType(), True)
+                       ])
+        ), True),
+        StructField("categories",
+          ArrayType(
+            StructType([
+                        StructField("value", StringType(), True),
+                        StructField("label", StringType(), True)
+                       ])
+        ), True),
+        StructField("medium",
+          ArrayType(
+            StructType([
+                        StructField("value", StringType(), True),
+                        StructField("label", StringType(), True)
+                       ])
+        ), True)
+])
+mentor_sessions_rdd = spark.sparkContext.parallelize(list(mentor_sessions_cursorMongo))
+sessions_df = spark.createDataFrame(mentor_sessions_rdd,mentor_sessions_schema)
+sessions_df = sessions_df.withColumn("startDateUtc_timestamp",to_timestamp(col("startDateUtc")))\
+                         .withColumn("endDateUtc_timestamp",to_timestamp(col("endDateUtc")))\
+                         .withColumn("Duration_of_session_min",round((col("endDateUtc_timestamp").cast("long") - col("startDateUtc_timestamp").cast("long"))/60))
+mentor_sessions_df = sessions_df.select(F.col("_id").alias("sessionId"),"userId","status","feedbacks")
+mentoru_sessions_df = mentor_sessions_df.groupBy("userId").agg(count(when(F.col("status") == "completed",True))\
+                       .alias("No_of_sessions_conducted"),F.count("sessionId").alias("No_of_session_created"))
+users_cursorMongo = users_collec.aggregate(
+        [{"$match": {"deleted": {"$exists":True,"$ne":None,"$eq":False}}},
+         {
+          "$project": {
+             "_id": {"$toString": "$_id"},
+             "isAMentor": 1,
+             "location": {"_id":{"$toString": "$_id"},"value":1,"label":1},
+             "designation":{"_id":{"$toString": "$_id"},"value":1,"label":1},
+             "experience":1,
+             "areasOfExpertise":{"_id":{"$toString": "$_id"},"value":1,"label":1}
+           }
+         }
+        ])
+
+        
+users_schema = StructType([
+    StructField("_id", StringType(), True),
+    StructField("isAMentor",BooleanType(),True),
+    StructField("location",
+        ArrayType(
+            StructType([StructField("_id",StringType(),True),
+                StructField("value",StringType(),True),
+                StructField("label",StringType(),True)])
+            ),True),
+    StructField("designation",
+        ArrayType(
+            StructType([StructField("_id",StringType(),True),
+                StructField("value",StringType(),True),
+                StructField("label",StringType(),True)])
+            ),True),
+    StructField("experience",StringType(),True),
+    StructField("areasOfExpertise",
+        ArrayType(
+            StructType([StructField("_id",StringType(),True),
+                 StructField("value",StringType(),True),
+                 StructField("label",StringType(),True)])
+            ),True)
+    ])
+
+users_rdd = spark.sparkContext.parallelize(list(users_cursorMongo))
+users_df = spark.createDataFrame(users_rdd,users_schema)
+
+users_df = users_df.withColumn("exploded_location",F.explode_outer(F.col("location")))
+
+users_df = users_df.select(F.col("_id").alias("UUID"),
+                           F.col("exploded_location.label").alias("State"),
+                           concat_ws(",",F.col("designation.label")).alias("Designation"),
+                           F.col("experience").alias("Years_of_Experience"),
+                           concat_ws(",",F.col("areasOfExpertise.label")).alias("Areas_of_Expertise")
+           )
+mentee_users_df = users_df.select("UUID","State","Designation","Years_of_Experience")
+
+mentor_user_sessions_df = mentoru_sessions_df.join(users_df,users_df["UUID"] == mentor_sessions_df["userId"],how="left")\
+                .select(users_df["*"],mentoru_sessions_df["No_of_session_created"],mentoru_sessions_df["No_of_sessions_conducted"])
+mentor_user_sessions_df = mentor_user_sessions_df.na.fill(0,subset=["No_of_session_created","No_of_sessions_conducted"])
+
+session_attendees_cursorMongo = session_attendees_collec.aggregate(
+        [{"$match": {"deleted": {"$exists":True,"$ne":None,"$eq":False}}},
+         {
+          "$project": {
+             "_id": {"$toString": "$_id"},
+             "userId": {"$toString": "$userId"},
+             "isSessionAttended":1,
+             "feedbacks":{"_id":{"$toString": "$_id"},"questionId":{"$toString": "$questionId"},"value":1,"label":1},
+             "sessionId":{"$toString": "$sessionId"}
+          }
+         }
+        ])
+
+session_attendees_schema = StructType([
+    StructField("_id", StringType(), True),
+    StructField("userId", StringType(), True),
+    StructField("isSessionAttended",BooleanType(),True),
+    StructField("feedbacks",
+          ArrayType(
+            StructType([
+                        StructField("_id", StringType(), True),
+                        StructField("questionId", StringType(), True),
+                        StructField("value", StringType(), True),
+                        StructField("label", StringType(), True)
+                       ])
+    ), True),
+    StructField("sessionId",StringType(),True)
+    ])
+
+session_attendees_rdd = spark.sparkContext.parallelize(list(session_attendees_cursorMongo))
+session_attendees_df = spark.createDataFrame(session_attendees_rdd,session_attendees_schema)
+session_attendees_df_fd = session_attendees_df.filter(size("feedbacks")>=1)
+session_attendees_df_fd = session_attendees_df_fd.withColumn("exploded_feedbacks",F.explode_outer(F.col("feedbacks")))
+session_attendees_df_fd_sr = session_attendees_df_fd.filter(F.col("exploded_feedbacks.label").isin(\
+                             "How would you rate the Audio/Video quality?","How would you rate the engagement in the session?",\
+                             "How would you rate the host of the session?"))
+session_attendees_df_fd_sr = session_attendees_df_fd_sr.groupBy("_id","sessionId").pivot("exploded_feedbacks.label")\
+                             .agg(F.first("exploded_feedbacks.value"))
+session_attendees_df_fd_sr = session_attendees_df_fd_sr.groupBy("sessionId")\
+                             .agg(avg(F.col("How would you rate the Audio/Video quality?")).alias("How would you rate the Audio/Video quality?"),\
+                             avg(F.col("How would you rate the engagement in the session?")).alias("How would you rate the engagement in the session?"),\
+                             avg(F.col("How would you rate the host of the session?")).alias("How would you rate the host of the session?"))
+
+session_attendees_df_fd = session_attendees_df_fd.filter(F.col("exploded_feedbacks.label").isin("How would you rate the host of the session?","How would you rate the engagement in the session?"))
+session_attendees_df_fd = session_attendees_df_fd.groupBy("_id","userId","isSessionAttended").pivot("exploded_feedbacks.label")\
+                          .agg(F.first("exploded_feedbacks.value"))
+session_attendees_df_fd = session_attendees_df_fd.groupBy("userId")\
+                          .agg(avg(F.col("How would you rate the host of the session?"))\
+                          avg(F.col("How would you rate the engagement in the session?")).alias("How would you rate the engagement in the session?"))
+user_avg_mentor_rating_columns = [F.col("How would you rate the host of the session?"), F.col("How would you rate the engagement in the session?")]
+session_attendees_df_fd = session_attendees_df_fd.na.fill(0).withColumn("Avg_Mentor_rating" ,\
+                          reduce(add, [x for x in user_avg_mentor_rating_columns])/len(user_avg_mentor_rating_columns))
+final_mentor_user_sessions_df = mentor_user_sessions_df.join(session_attendees_df_fd,\
+                                mentor_user_sessions_df["UUID"]==session_attendees_df_fd["userId"],how="left")\
+                                .select(mentor_user_sessions_df["*"],session_attendees_df_fd["How would you rate the host of the session?"],\
+                                session_attendees_df_fd["How would you rate the engagement in the session?"],\
+                                session_attendees_df_fd["Avg_Mentor_rating"]).persist(StorageLevel.MEMORY_AND_DISK)
+final_mentor_user_sessions_df = final_mentor_user_sessions_df.na.fill(0,subset=["How would you rate the host of the session?",\
+                                "How would you rate the engagement in the session?"])
+final_mentor_user_sessions_df.repartition(1).write.format("csv").option("header",True).option("compression","gzip").mode("overwrite").save(
+    config.get("S3","mentor_user_path")
+)
+
+## Mentee User Report
+mentee_session_attendees_df = session_attendees_df.select(F.col("_id").alias("sessionAttendeesId"),"userId","isSessionAttended","feedbacks")
+mentee_session_attendees_df = mentee_session_attendees_df.groupBy("userId").agg(count(when(F.col("isSessionAttended") == True,True))\
+                       .alias("No_of_sessions_attended"),F.count("sessionAttendeesId").alias("No_of_sessions_enrolled"))
+mentee_user_session_attendees_df = mentee_session_attendees_df.join(mentee_users_df,mentee_users_df["UUID"] == mentee_session_attendees_df["userId"],how="left")\
+                .select(mentee_users_df["*"],mentee_session_attendees_df["No_of_sessions_enrolled"],mentee_session_attendees_df["No_of_sessions_attended"])
+mentee_user_session_attendees_df = mentee_user_session_attendees_df.na.fill(0,subset=["No_of_sessions_enrolled",\
+                                   "No_of_sessions_attended"])
+mentee_user_session_attendees_df.repartition(1).write.format("csv").option("header",True).option("compression","gzip").mode("overwrite").save(
+    config.get("S3","mentee_user_path")
+)
+
+## Session Report
+session_attendees_df_sr = session_attendees_df.groupBy("sessionId")\
+                          .agg(F.count("_id").alias("No_of_Mentees_enrolled"),\
+                          count(when(F.col("isSessionAttended") == True,True)).alias("No_of_Mentees_attended_the_session"),\
+                          count(when(size("feedbacks")>=1,True)).alias("No_of_Mentees_who_gave_feedback"))
+final_sessions_df = sessions_df.select(col("_id").alias("sessionId"),col("userId").alias("Host_UUID"),col("createdAt").alias("Time_stamp_of_session_creation"),\
+                    col("startDateUtc").alias("Time_stamp_of_session_scheduled"),col("Duration_of_session_min"),\
+                    col("title").alias("Title_of_the_session"),\
+                    concat_ws(",",F.col("recommendedFor.label")).alias("Recommended_for"),\
+                    concat_ws(",",F.col("categories.label")).alias("Categories"),\
+                    concat_ws(",",F.col("medium.label")).alias("Languages"))
+
+final_sessions_df = final_sessions_df.join(session_attendees_df_sr,\
+                    final_sessions_df["sessionId"] == session_attendees_df_sr["sessionId"],how="left")\
+                    .select(final_sessions_df["*"],session_attendees_df_sr["No_of_Mentees_enrolled"],\
+                    session_attendees_df_sr["No_of_Mentees_attended_the_session"],\
+                    session_attendees_df_sr["No_of_Mentees_who_gave_feedback"])
+final_sessions_df = final_sessions_df.na.fill(0,subset=["No_of_Mentees_enrolled","No_of_Mentees_attended_the_session",\
+                    "No_of_Mentees_who_gave_feedback"])
+final_sessions_df_sr = final_sessions_df.join(session_attendees_df_fd_sr,\
+                       final_sessions_df["sessionId"] == session_attendees_df_fd_sr["sessionId"],how="left")\
+                       .select(final_sessions_df["*"],session_attendees_df_fd_sr["How would you rate the Audio/Video quality?"],\
+                       session_attendees_df_fd_sr["How would you rate the engagement in the session?"],\
+                       session_attendees_df_fd_sr["How would you rate the host of the session?"])
+final_sessions_df_sr = final_sessions_df_sr.na.fill(0,subset=["How would you rate the Audio/Video quality?",\
+                       "How would you rate the engagement in the session?","How would you rate the host of the session?"])
+final_sessions_df_sr.repartition(1).write.format("csv").option("header",True).option("compression","gzip").mode("overwrite").save(
+    config.get("S3","session_path")
+)
+##Generating Pre-signed url for all the reports stored in S3
+s3_session_folder="reports/session/"
+s3_mentor_user_folder="reports/mentor_user/"
+s3_mentee_user_folder="reports/mentee_user/"
+session_fileName = None
+mentorUser_fileName = None
+menteeUser_fileName = None
+for f in s3_bucket.objects.filter(Prefix=s3_mentor_user_folder):
+    if str(f.key.split('/')[-1]).endswith(".csv.gz"):
+     mentorUser_fileName = f.key.split('/')[-1]
+for f in s3_bucket.objects.filter(Prefix=s3_mentee_user_folder):
+    if str(f.key.split('/')[-1]).endswith(".csv.gz"):
+     menteeUser_fileName = f.key.split('/')[-1]
+for f in s3_bucket.objects.filter(Prefix=s3_session_folder):
+    if str(f.key.split('/')[-1]).endswith(".csv.gz"):
+     session_fileName = f.key.split('/')[-1]
+mentor_user_presigned_url = s3_presigned_client.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": config.get("S3","bucket_name"), "Key": s3_mentor_user_folder+mentorUser_fileName}
+    )
+mentee_user_presigned_url = s3_presigned_client.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": config.get("S3","bucket_name"), "Key": s3_mentee_user_folder+menteeUser_fileName}
+    )
+session_presigned_url = s3_presigned_client.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": config.get("S3","bucket_name"), "Key": s3_session_folder+session_fileName}
+    )
+
+## Send Email
+kafka_producer = KafkaProducer(bootstrap_servers=config.get("KAFKA","kafka_url"))
+
+email_data = {"type":"email","email":{"to":config.get("EMAIL","to"),"cc":config.get("EMAIL","cc"),"subject":"MentorED - User and Session Reports On a Daily Basis","body":"<div style='margin:auto;width:50%'><p style='text-align:center'><img style='height:250px;' class='cursor-pointer' alt='MentorED' src='https://mentoring-dev-storage.s3.ap-south-1.amazonaws.com/email/image/logo.png'></p><div><p>Hello , </p> Please find the User and Session Reports Attachment Links below ...<p><b>Mentor User Report:- </b>"+mentor_user_presigned_url+"</p><p><b>Mentee User Report:- </b>"+mentee_user_presigned_url+"</p><p><b>Session Report:- </b>"+session_presigned_url+"</p></div><div style='margin-top:100px'><div>Thanks & Regards</div><div>Team MentorED</div><div style='margin-top:20px;color:#b13e33'><div><p>Note:- </p><ul><li>FYI, The Attachment Link shared above will be having the expiry duration. Please use it before expires</li><li>Do not reply to this email. This email is sent from an unattended mailbox. Replies will not be read.</div><div>For any queries, please feel free to reach out to us at support@shikshalokam.org</li></ul></div></div></div></div>"}}
+kafka_producer.send(config.get("KAFKA","notification_kafka_topic_name"), json.dumps(email_data, default=json_util.default).encode('utf-8'))
+kafka_producer.flush()
