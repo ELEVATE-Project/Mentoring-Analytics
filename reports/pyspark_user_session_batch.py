@@ -284,7 +284,7 @@ final_mentor_user_sessions_df = mentor_user_sessions_df.join(session_attendees_d
                                 session_attendees_df_fd["Avg_Mentor_rating"]).persist(StorageLevel.MEMORY_AND_DISK)
 final_mentor_user_sessions_df = final_mentor_user_sessions_df.na.fill(0,subset=["How would you rate the host of the session?",\
                                 "How would you rate the engagement in the session?"])
-final_mentor_user_sessions_df.repartition(1).write.format("csv").option("header",True).option("compression","gzip").mode("overwrite").save(
+final_mentor_user_sessions_df.repartition(1).write.format("csv").option("header",True).mode("overwrite").save(
     config.get("S3","mentor_user_path")
 )
 
@@ -296,7 +296,7 @@ mentee_user_session_attendees_df = mentee_session_attendees_df.join(mentee_users
                 .select(mentee_users_df["*"],mentee_session_attendees_df["No_of_sessions_enrolled"],mentee_session_attendees_df["No_of_sessions_attended"])
 mentee_user_session_attendees_df = mentee_user_session_attendees_df.na.fill(0,subset=["No_of_sessions_enrolled",\
                                    "No_of_sessions_attended"])
-mentee_user_session_attendees_df.repartition(1).write.format("csv").option("header",True).option("compression","gzip").mode("overwrite").save(
+mentee_user_session_attendees_df.repartition(1).write.format("csv").option("header",True).mode("overwrite").save(
     config.get("S3","mentee_user_path")
 )
 
@@ -326,7 +326,7 @@ final_sessions_df_sr = final_sessions_df.join(session_attendees_df_fd_sr,\
                        session_attendees_df_fd_sr["How would you rate the host of the session?"])
 final_sessions_df_sr = final_sessions_df_sr.na.fill(0,subset=["How would you rate the Audio/Video quality?",\
                        "How would you rate the engagement in the session?","How would you rate the host of the session?"])
-final_sessions_df_sr.repartition(1).write.format("csv").option("header",True).option("compression","gzip").mode("overwrite").save(
+final_sessions_df_sr.repartition(1).write.format("csv").option("header",True).mode("overwrite").save(
     config.get("S3","session_path")
 )
 ##Generating Pre-signed url for all the reports stored in S3
@@ -337,13 +337,13 @@ session_fileName = None
 mentorUser_fileName = None
 menteeUser_fileName = None
 for f in s3_bucket.objects.filter(Prefix=s3_mentor_user_folder):
-    if str(f.key.split('/')[-1]).endswith(".csv.gz"):
+    if str(f.key.split('/')[-1]).endswith(".csv"):
      mentorUser_fileName = f.key.split('/')[-1]
 for f in s3_bucket.objects.filter(Prefix=s3_mentee_user_folder):
-    if str(f.key.split('/')[-1]).endswith(".csv.gz"):
+    if str(f.key.split('/')[-1]).endswith(".csv"):
      menteeUser_fileName = f.key.split('/')[-1]
 for f in s3_bucket.objects.filter(Prefix=s3_session_folder):
-    if str(f.key.split('/')[-1]).endswith(".csv.gz"):
+    if str(f.key.split('/')[-1]).endswith(".csv"):
      session_fileName = f.key.split('/')[-1]
 mentor_user_presigned_url = s3_presigned_client.generate_presigned_url(
         "get_object",
