@@ -272,7 +272,7 @@ session_attendees_df_fd = session_attendees_df_fd.filter(F.col("exploded_feedbac
 session_attendees_df_fd = session_attendees_df_fd.groupBy("_id","userId","isSessionAttended").pivot("exploded_feedbacks.label")\
                           .agg(F.first("exploded_feedbacks.value"))
 session_attendees_df_fd = session_attendees_df_fd.groupBy("userId")\
-                          .agg(avg(F.col("How would you rate the host of the session?"))\
+                          .agg(avg(F.col("How would you rate the host of the session?")).alias("How would you rate the host of the session?"),\
                           avg(F.col("How would you rate the engagement in the session?")).alias("How would you rate the engagement in the session?"))
 user_avg_mentor_rating_columns = [F.col("How would you rate the host of the session?"), F.col("How would you rate the engagement in the session?")]
 session_attendees_df_fd = session_attendees_df_fd.na.fill(0).withColumn("Avg_Mentor_rating" ,\
