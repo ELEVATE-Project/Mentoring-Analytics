@@ -257,36 +257,41 @@ session_attendees_schema = StructType([
 session_attendees_rdd = spark.sparkContext.parallelize(list(session_attendees_cursorMongo))
 session_attendees_df = spark.createDataFrame(session_attendees_rdd,session_attendees_schema)
 session_attendees_df_fd = session_attendees_df.filter(size("feedbacks")>=1)
-session_attendees_df_fd = session_attendees_df_fd.withColumn("exploded_feedbacks",F.explode_outer(F.col("feedbacks")))
-session_attendees_df_fd_sr = session_attendees_df_fd.filter(F.col("exploded_feedbacks.label").isin(\
+if (session_attendees_df_fd.count() >=1) :
+ session_attendees_df_fd = session_attendees_df_fd.withColumn("exploded_feedbacks",F.explode_outer(F.col("feedbacks")))
+ session_attendees_df_fd_sr = session_attendees_df_fd.filter(F.col("exploded_feedbacks.label").isin(\
                              "How would you rate the Audio/Video quality?","How would you rate the engagement in the session?",\
                              "How would you rate the host of the session?"))
-session_attendees_df_fd_sr = session_attendees_df_fd_sr.groupBy("_id","sessionId").pivot("exploded_feedbacks.label")\
+ session_attendees_df_fd_sr = session_attendees_df_fd_sr.groupBy("_id","sessionId").pivot("exploded_feedbacks.label")\
                              .agg(F.first("exploded_feedbacks.value"))
-session_attendees_df_fd_sr = session_attendees_df_fd_sr.groupBy("sessionId")\
+ session_attendees_df_fd_sr = session_attendees_df_fd_sr.groupBy("sessionId")\
                              .agg(avg(F.col("How would you rate the Audio/Video quality?")).alias("How would you rate the Audio/Video quality?"),\
                              avg(F.col("How would you rate the engagement in the session?")).alias("How would you rate the engagement in the session?"),\
                              avg(F.col("How would you rate the host of the session?")).alias("How would you rate the host of the session?"))
 
-session_attendees_df_fd = session_attendees_df_fd.filter(F.col("exploded_feedbacks.label").isin("How would you rate the host of the session?","How would you rate the engagement in the session?"))
-session_attendees_df_fd = session_attendees_df_fd.groupBy("_id","userId","isSessionAttended").pivot("exploded_feedbacks.label")\
+ session_attendees_df_fd = session_attendees_df_fd.filter(F.col("exploded_feedbacks.label").isin("How would you rate the host of the session?","How would you rate the engagement in the session?"))
+ session_attendees_df_fd = session_attendees_df_fd.groupBy("_id","userId","isSessionAttended").pivot("exploded_feedbacks.label")\
                           .agg(F.first("exploded_feedbacks.value"))
-session_attendees_df_fd = session_attendees_df_fd.groupBy("userId")\
+ session_attendees_df_fd = session_attendees_df_fd.groupBy("userId")\
                           .agg(avg(F.col("How would you rate the host of the session?")).alias("How would you rate the host of the session?"),\
                           avg(F.col("How would you rate the engagement in the session?")).alias("How would you rate the engagement in the session?"))
-user_avg_mentor_rating_columns = [F.col("How would you rate the host of the session?"), F.col("How would you rate the engagement in the session?")]
-session_attendees_df_fd = session_attendees_df_fd.na.fill(0).withColumn("Avg_Mentor_rating" ,\
+ user_avg_mentor_rating_columns = [F.col("How would you rate the host of the session?"), F.col("How would you rate the engagement in the session?")]
+ session_attendees_df_fd = session_attendees_df_fd.na.fill(0).withColumn("Avg_Mentor_rating" ,\
                           reduce(add, [x for x in user_avg_mentor_rating_columns])/len(user_avg_mentor_rating_columns))
-final_mentor_user_sessions_df = mentor_user_sessions_df.join(session_attendees_df_fd,\
+ final_mentor_user_sessions_df = mentor_user_sessions_df.join(session_attendees_df_fd,\
                                 mentor_user_sessions_df["UUID"]==session_attendees_df_fd["userId"],how="left")\
                                 .select(mentor_user_sessions_df["*"],session_attendees_df_fd["How would you rate the host of the session?"],\
                                 session_attendees_df_fd["How would you rate the engagement in the session?"],\
                                 session_attendees_df_fd["Avg_Mentor_rating"]).persist(StorageLevel.MEMORY_AND_DISK)
-final_mentor_user_sessions_df = final_mentor_user_sessions_df.na.fill(0,subset=["How would you rate the host of the session?",\
+ final_mentor_user_sessions_df = final_mentor_user_sessions_df.na.fill(0,subset=["How would you rate the host of the session?",\
                                 "How would you rate the engagement in the session?"])
-final_mentor_user_sessions_df.repartition(1).write.format("csv").option("header",True).mode("overwrite").save(
+ final_mentor_user_sessions_df.repartition(1).write.format("csv").option("header",True).mode("overwrite").save(
     config.get("S3","mentor_user_path")
-)
+ )
+else:
+ mentor_user_sessions_df.repartition(1).write.format("csv").option("header",True).mode("overwrite").save(
+    config.get("S3","mentor_user_path")
+ )
 
 ## Mentee User Report
 mentee_session_attendees_df = session_attendees_df.select(F.col("_id").alias("sessionAttendeesId"),"userId","isSessionAttended","feedbacks")
@@ -319,16 +324,21 @@ final_sessions_df = final_sessions_df.join(session_attendees_df_sr,\
                     session_attendees_df_sr["No_of_Mentees_who_gave_feedback"])
 final_sessions_df = final_sessions_df.na.fill(0,subset=["No_of_Mentees_enrolled","No_of_Mentees_attended_the_session",\
                     "No_of_Mentees_who_gave_feedback"])
-final_sessions_df_sr = final_sessions_df.join(session_attendees_df_fd_sr,\
+if (session_attendees_df_fd.count() >=1) :
+ final_sessions_df_sr = final_sessions_df.join(session_attendees_df_fd_sr,\
                        final_sessions_df["sessionId"] == session_attendees_df_fd_sr["sessionId"],how="left")\
                        .select(final_sessions_df["*"],session_attendees_df_fd_sr["How would you rate the Audio/Video quality?"],\
                        session_attendees_df_fd_sr["How would you rate the engagement in the session?"],\
                        session_attendees_df_fd_sr["How would you rate the host of the session?"])
-final_sessions_df_sr = final_sessions_df_sr.na.fill(0,subset=["How would you rate the Audio/Video quality?",\
+ final_sessions_df_sr = final_sessions_df_sr.na.fill(0,subset=["How would you rate the Audio/Video quality?",\
                        "How would you rate the engagement in the session?","How would you rate the host of the session?"])
-final_sessions_df_sr.repartition(1).write.format("csv").option("header",True).mode("overwrite").save(
+ final_sessions_df_sr.repartition(1).write.format("csv").option("header",True).mode("overwrite").save(
     config.get("S3","session_path")
-)
+ )
+else:
+ final_sessions_df.repartition(1).write.format("csv").option("header",True).mode("overwrite").save(
+    config.get("S3","session_path")
+ )
 ##Generating Pre-signed url for all the reports stored in S3
 s3_session_folder="reports/session/"
 s3_mentor_user_folder="reports/mentor_user/"
