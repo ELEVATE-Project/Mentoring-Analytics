@@ -174,6 +174,7 @@ users_cursorMongo = users_collec.aggregate(
          {
           "$project": {
              "_id": {"$toString": "$_id"},
+             "name": 1,
              "isAMentor": 1,
              "location": {"_id":{"$toString": "$_id"},"value":1,"label":1},
              "designation":{"_id":{"$toString": "$_id"},"value":1,"label":1},
@@ -186,6 +187,7 @@ users_cursorMongo = users_collec.aggregate(
         
 users_schema = StructType([
     StructField("_id", StringType(), True),
+    StructField("name", StringType(), True),
     StructField("isAMentor",BooleanType(),True),
     StructField("location",
         ArrayType(
@@ -214,12 +216,13 @@ users_df = spark.createDataFrame(users_rdd,users_schema)
 users_df = users_df.withColumn("exploded_location",F.explode_outer(F.col("location")))
 
 users_df = users_df.select(F.col("_id").alias("UUID"),
+                           F.col("name").alias("User Name"),
                            F.col("exploded_location.label").alias("State"),
                            concat_ws(",",F.col("designation.label")).alias("Designation"),
                            F.col("experience").alias("Years_of_Experience"),
                            concat_ws(",",F.col("areasOfExpertise.label")).alias("Areas_of_Expertise")
            )
-mentee_users_df = users_df.select("UUID","State","Designation","Years_of_Experience")
+mentee_users_df = users_df.select("UUID","User Name","State","Designation","Years_of_Experience")
 
 mentor_user_sessions_df = mentoru_sessions_df.join(users_df,users_df["UUID"] == mentor_sessions_df["userId"],how="left")\
                 .select(users_df["*"],mentoru_sessions_df["No_of_session_created"],mentoru_sessions_df["No_of_sessions_conducted"])
