@@ -1,4 +1,4 @@
-import json,os,sys
+import json,os,sys,csv
 from configparser import ConfigParser,ExtendedInterpolation
 from pymongo import MongoClient
 from bson.objectid import ObjectId
@@ -10,7 +10,7 @@ from pyspark.sql.functions import *
 import pyspark.sql.functions as F
 from pyspark.sql.types import *
 from pyspark.sql import Row
-from pyspark.sql.functions import array, col, explode, lit, struct
+from pyspark.sql.functions import array, col, explode, lit, struct 
 from pyspark.sql import DataFrame
 from typing import Iterable 
 from functools import reduce
@@ -19,6 +19,10 @@ from pyspark import StorageLevel
 import boto3
 from kafka import KafkaConsumer, KafkaProducer
 from bson import json_util
+from datetime import date
+today = date.today()
+currentDate =  today.strftime("%d.%m.%Y")
+
 
 config_path = os.path.split(os.path.dirname(os.path.abspath(__file__)))
 config = ConfigParser(interpolation=ExtendedInterpolation())
@@ -28,6 +32,7 @@ formatter = logging.Formatter('%(asctime)s - %(levelname)s')
 
 successLogger = logging.getLogger('success log')
 successLogger.setLevel(logging.DEBUG)
+
 
 # Add the log message handler to the logger
 successHandler = logging.handlers.RotatingFileHandler(
@@ -268,19 +273,24 @@ if (session_attendees_df_fd.count() >=1) :
  session_attendees_df_fd_sr = session_attendees_df_fd_sr.groupBy("_id","sessionId").pivot("exploded_feedbacks.label")\
                              .agg(F.first("exploded_feedbacks.value"))
  session_attendees_df_fd_sr = session_attendees_df_fd_sr.groupBy("sessionId")\
-                             .agg(avg(F.col("How would you rate the Audio/Video quality?")).alias("How would you rate the Audio/Video quality?"),\
-                             avg(F.col("How would you rate the engagement in the session?")).alias("How would you rate the engagement in the session?"),\
-                             avg(F.col("How would you rate the host of the session?")).alias("How would you rate the host of the session?"))
+                             .agg(avg(F.round(F.col("How would you rate the Audio/Video quality?"),2)).alias("How would you rate the Audio/Video quality?"),\
+                             avg(F.round(F.col("How would you rate the engagement in the session?"),2)).alias("How would you rate the engagement in the session?"),\
+                             avg(F.round(F.col("How would you rate the host of the session?"),2)).alias("How would you rate the host of the session?"))
 
  session_attendees_df_fd = session_attendees_df_fd.filter(F.col("exploded_feedbacks.label").isin("How would you rate the host of the session?","How would you rate the engagement in the session?"))
  session_attendees_df_fd = session_attendees_df_fd.groupBy("_id","userId","isSessionAttended").pivot("exploded_feedbacks.label")\
                           .agg(F.first("exploded_feedbacks.value"))
  session_attendees_df_fd = session_attendees_df_fd.groupBy("userId")\
-                          .agg(avg(F.col("How would you rate the host of the session?")).alias("How would you rate the host of the session?"),\
-                          avg(F.col("How would you rate the engagement in the session?")).alias("How would you rate the engagement in the session?"))
+                          .agg(avg(F.round(F.col("How would you rate the host of the session?"),2)).alias("How would you rate the host of the session?"),\
+                          avg(F.round(F.col("How would you rate the engagement in the session?"),2)).alias("How would you rate the engagement in the session?"))
  user_avg_mentor_rating_columns = [F.col("How would you rate the host of the session?"), F.col("How would you rate the engagement in the session?")]
- session_attendees_df_fd = session_attendees_df_fd.na.fill(0).withColumn("Avg_Mentor_rating" ,\
-                          reduce(add, [x for x in user_avg_mentor_rating_columns])/len(user_avg_mentor_rating_columns))
+ session_attendees_df_fd = session_attendees_df_fd.na.fill(0).withColumn(
+    "Avg_Mentor_rating",
+    round(
+        reduce(add, [x for x in user_avg_mentor_rating_columns])/len(user_avg_mentor_rating_columns),
+        2
+    )
+)
  final_mentor_user_sessions_df = mentor_user_sessions_df.join(session_attendees_df_fd,\
                                 mentor_user_sessions_df["UUID"]==session_attendees_df_fd["userId"],how="left")\
                                 .select(mentor_user_sessions_df["*"],session_attendees_df_fd["How would you rate the host of the session?"],\
@@ -288,10 +298,17 @@ if (session_attendees_df_fd.count() >=1) :
                                 session_attendees_df_fd["Avg_Mentor_rating"]).persist(StorageLevel.MEMORY_AND_DISK)
  final_mentor_user_sessions_df = final_mentor_user_sessions_df.na.fill(0,subset=["How would you rate the host of the session?",\
                                 "How would you rate the engagement in the session?"])
+ 
+# update mentor headers
+ final_mentor_user_sessions_df = final_mentor_user_sessions_df.withColumnRenamed("User Name","Mentor Name").withColumnRenamed("How would you rate the host of the session?","Mentor Rating").withColumnRenamed("How would you rate the engagement in the session?","Session Rating")
+
  final_mentor_user_sessions_df.repartition(1).write.format("csv").option("header",True).mode("overwrite").save(
     config.get("S3","mentor_user_path")
  )
 else:
+ #  update mentor headers
+ mentor_user_sessions_df = mentor_user_sessions_df.withColumnRenamed("User Name","Mentor Name").withColumnRenamed("How would you rate the host of the session?","Mentor Rating").withColumnRenamed("How would you rate the engagement in the session?","Session Rating")
+ 
  mentor_user_sessions_df.repartition(1).write.format("csv").option("header",True).mode("overwrite").save(
     config.get("S3","mentor_user_path")
  )
@@ -304,6 +321,7 @@ mentee_user_session_attendees_df = mentee_session_attendees_df.join(mentee_users
                 .select(mentee_users_df["*"],mentee_session_attendees_df["No_of_sessions_enrolled"],mentee_session_attendees_df["No_of_sessions_attended"])
 mentee_user_session_attendees_df = mentee_user_session_attendees_df.na.fill(0,subset=["No_of_sessions_enrolled",\
                                    "No_of_sessions_attended"])
+
 mentee_user_session_attendees_df.repartition(1).write.format("csv").option("header",True).mode("overwrite").save(
     config.get("S3","mentee_user_path")
 )
@@ -313,12 +331,28 @@ session_attendees_df_sr = session_attendees_df.groupBy("sessionId")\
                           .agg(F.count("_id").alias("No_of_Mentees_enrolled"),\
                           count(when(F.col("isSessionAttended") == True,True)).alias("No_of_Mentees_attended_the_session"),\
                           count(when(size("feedbacks")>=1,True)).alias("No_of_Mentees_who_gave_feedback"))
+
 final_sessions_df = sessions_df.select(col("_id").alias("sessionId"),col("userId").alias("Host_UUID"),col("createdAt").alias("Time_stamp_of_session_creation"),\
                     col("startDateUtc").alias("Time_stamp_of_session_scheduled"),col("Duration_of_session_min"),\
                     col("title").alias("Title_of_the_session"),\
                     concat_ws(",",F.col("recommendedFor.label")).alias("Recommended_for"),\
                     concat_ws(",",F.col("categories.label")).alias("Categories"),\
                     concat_ws(",",F.col("medium.label")).alias("Languages"))
+
+
+final_sessions_df = final_sessions_df.join(users_df, col("Host_UUID") == col("UUID"), "left") \
+    .select(
+        final_sessions_df["sessionId"],
+        final_sessions_df["Host_UUID"],
+        users_df["User Name"].alias("Mentor Name"),
+        final_sessions_df["Time_stamp_of_session_creation"],
+        final_sessions_df["Time_stamp_of_session_scheduled"],
+        final_sessions_df["Duration_of_session_min"],
+        final_sessions_df["Title_of_the_session"],
+        final_sessions_df["Recommended_for"],
+        final_sessions_df["Categories"],
+        final_sessions_df["Languages"]
+    )
 
 final_sessions_df = final_sessions_df.join(session_attendees_df_sr,\
                     final_sessions_df["sessionId"] == session_attendees_df_sr["sessionId"],how="left")\
@@ -327,6 +361,8 @@ final_sessions_df = final_sessions_df.join(session_attendees_df_sr,\
                     session_attendees_df_sr["No_of_Mentees_who_gave_feedback"])
 final_sessions_df = final_sessions_df.na.fill(0,subset=["No_of_Mentees_enrolled","No_of_Mentees_attended_the_session",\
                     "No_of_Mentees_who_gave_feedback"])
+
+
 if (session_attendees_df_fd.count() >=1) :
  final_sessions_df_sr = final_sessions_df.join(session_attendees_df_fd_sr,\
                        final_sessions_df["sessionId"] == session_attendees_df_fd_sr["sessionId"],how="left")\
@@ -335,14 +371,22 @@ if (session_attendees_df_fd.count() >=1) :
                        session_attendees_df_fd_sr["How would you rate the host of the session?"])
  final_sessions_df_sr = final_sessions_df_sr.na.fill(0,subset=["How would you rate the Audio/Video quality?",\
                        "How would you rate the engagement in the session?","How would you rate the host of the session?"])
+ 
+ # update sessions headers
+ final_sessions_df_sr = final_sessions_df_sr.withColumnRenamed("How would you rate the Audio/Video quality?","Audio/Video quality rating").withColumnRenamed("How would you rate the engagement in the session?","Session Engagement Rating").withColumnRenamed("Host_UUID","Mentor UUID").withColumnRenamed("How would you rate the host of the session?","Mentor Rating")
+
  final_sessions_df_sr.repartition(1).write.format("csv").option("header",True).mode("overwrite").save(
     config.get("S3","session_path")
  )
 else:
+ # update sessions headers
+ final_sessions_df = final_sessions_df.withColumnRenamed("How would you rate the Audio/Video quality?","Audio/Video quality rating").withColumnRenamed("How would you rate the engagement in the session?","Session Engagement Rating").withColumnRenamed("Host_UUID","Mentor UUID").withColumnRenamed("How would you rate the host of the session?","Mentor Rating")
+ 
  final_sessions_df.repartition(1).write.format("csv").option("header",True).mode("overwrite").save(
     config.get("S3","session_path")
  )
 ##Generating Pre-signed url for all the reports stored in S3
+expiryInSec = 604800 #7 days in sec
 s3_session_folder="reports/session/"
 s3_mentor_user_folder="reports/mentor_user/"
 s3_mentee_user_folder="reports/mentee_user/"
@@ -358,20 +402,87 @@ for f in s3_bucket.objects.filter(Prefix=s3_mentee_user_folder):
 for f in s3_bucket.objects.filter(Prefix=s3_session_folder):
     if str(f.key.split('/')[-1]).endswith(".csv"):
      session_fileName = f.key.split('/')[-1]
+
+
+# Copying file to rename 
+source_object = {
+    'Bucket': config.get("S3","bucket_name"),
+    'Key': s3_mentor_user_folder+mentorUser_fileName
+}
+
+destination_object = s3_mentor_user_folder+"Mentor User Report_"+str(currentDate)+".csv"
+copy_source = source_object
+
+
+s3_client.meta.client.copy(copy_source,config.get("S3","bucket_name"), destination_object)
+
 mentor_user_presigned_url = s3_presigned_client.generate_presigned_url(
         "get_object",
-        Params={"Bucket": config.get("S3","bucket_name"), "Key": s3_mentor_user_folder+mentorUser_fileName}
-    )
-mentee_user_presigned_url = s3_presigned_client.generate_presigned_url(
-        "get_object",
-        Params={"Bucket": config.get("S3","bucket_name"), "Key": s3_mentee_user_folder+menteeUser_fileName}
-    )
-session_presigned_url = s3_presigned_client.generate_presigned_url(
-        "get_object",
-        Params={"Bucket": config.get("S3","bucket_name"), "Key": s3_session_folder+session_fileName}
+        Params={"Bucket": config.get("S3","bucket_name"), "Key": destination_object},
+        ExpiresIn = int(expiryInSec)
     )
 
-## Send Email
+
+# Get the S3 object
+s3_object = s3_client.Object(config.get("S3","bucket_name"),s3_mentor_user_folder+mentorUser_fileName)
+# Delete the file
+s3_object.delete()
+
+# Copying file to rename 
+source_object = {
+    'Bucket': config.get("S3","bucket_name"),
+    'Key': s3_mentee_user_folder+menteeUser_fileName
+}
+
+destination_object = s3_mentee_user_folder+"Mentee User Report_"+str(currentDate)+".csv"
+copy_source = source_object
+
+s3_client.meta.client.copy(copy_source,config.get("S3","bucket_name"), destination_object)
+
+
+mentee_user_presigned_url = s3_presigned_client.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": config.get("S3","bucket_name"), "Key": destination_object},
+        ExpiresIn = int(expiryInSec)
+    )
+
+
+# Get the S3 object
+s3_object = s3_client.Object(config.get("S3","bucket_name"),s3_mentor_user_folder+menteeUser_fileName)
+# Delete the file
+s3_object.delete()
+
+mentee_user_presigned_url_deleted = s3_presigned_client.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": config.get("S3","bucket_name"), "Key": s3_mentor_user_folder+menteeUser_fileName}
+    )
+
+
+# Copying file to rename 
+source_object = {
+    'Bucket': config.get("S3","bucket_name"),
+    'Key': s3_session_folder+session_fileName
+}
+
+destination_object = s3_session_folder+"Session Report_"+str(currentDate)+".csv"
+copy_source = source_object
+
+s3_client.meta.client.copy(copy_source,config.get("S3","bucket_name"), destination_object)
+
+session_presigned_url = s3_presigned_client.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": config.get("S3","bucket_name"), "Key": destination_object},
+        ExpiresIn = int(expiryInSec)
+    )
+
+
+# Get the S3 object
+s3_object = s3_client.Object(config.get("S3","bucket_name"),s3_session_folder+session_fileName)
+# Delete the file
+s3_object.delete()
+
+
+# Send Email
 kafka_producer = KafkaProducer(bootstrap_servers=config.get("KAFKA","kafka_url"))
 
 email_data = {"type":"email","email":{"to":config.get("EMAIL","to"),"cc":config.get("EMAIL","cc"),"subject":"MentorED - Daily report","body":"<div style='margin:auto;width:50%'><p style='text-align:center'><img style='height:250px;' class='cursor-pointer' alt='MentorED' src='https://mentoring-dev-storage.s3.ap-south-1.amazonaws.com/email/image/logo.png'></p><div><p>Hello , </p> Please find the User and Session Reports Attachment Links below ...<p><b>Mentor User Report:- </b>"+mentor_user_presigned_url+"</p><p><b>Mentee User Report:- </b>"+mentee_user_presigned_url+"</p><p><b>Session Report:- </b>"+session_presigned_url+"</p></div><div style='margin-top:100px'><div>Thanks & Regards</div><div>Team MentorED</div><div style='margin-top:20px;color:#b13e33'><div><p>Note:- </p><ul><li>FYI, The Attachment Link shared above will be having the expiry duration. Please use it before expires</li><li>Do not reply to this email. This email is sent from an unattended mailbox. Replies will not be read.</div><div>For any queries, please feel free to reach out to us at support@shikshalokam.org</li></ul></div></div></div></div>"}}
