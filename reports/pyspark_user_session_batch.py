@@ -386,7 +386,7 @@ else:
     config.get("S3","session_path")
  )
 ##Generating Pre-signed url for all the reports stored in S3
-expiryInSec = 604800 #7 days in sec
+expiryInSec = config.get("S3","expiryTime")
 s3_session_folder="reports/session/"
 s3_mentor_user_folder="reports/mentor_user/"
 s3_mentee_user_folder="reports/mentee_user/"
@@ -452,11 +452,6 @@ s3_object = s3_client.Object(config.get("S3","bucket_name"),s3_mentor_user_folde
 # Delete the file
 s3_object.delete()
 
-mentee_user_presigned_url_deleted = s3_presigned_client.generate_presigned_url(
-        "get_object",
-        Params={"Bucket": config.get("S3","bucket_name"), "Key": s3_mentor_user_folder+menteeUser_fileName}
-    )
-
 
 # Copying file to rename 
 source_object = {
@@ -480,6 +475,8 @@ session_presigned_url = s3_presigned_client.generate_presigned_url(
 s3_object = s3_client.Object(config.get("S3","bucket_name"),s3_session_folder+session_fileName)
 # Delete the file
 s3_object.delete()
+
+
 
 
 # Send Email

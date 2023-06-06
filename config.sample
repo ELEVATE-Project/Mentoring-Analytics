@@ -50,6 +50,8 @@ mentee_user_path = ${base_path}/{{mentee_user_folder}}/
 
 session_path = ${base_path}/{{session_folder}}/
 
+expiryTime = 604800
+
 [KAFKA]
 
 kafka_url = {{kafka_ip:port_no}}
