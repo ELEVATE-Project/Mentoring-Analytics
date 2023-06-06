@@ -273,9 +273,9 @@ if (session_attendees_df_fd.count() >=1) :
  session_attendees_df_fd_sr = session_attendees_df_fd_sr.groupBy("_id","sessionId").pivot("exploded_feedbacks.label")\
                              .agg(F.first("exploded_feedbacks.value"))
  session_attendees_df_fd_sr = session_attendees_df_fd_sr.groupBy("sessionId")\
-                             .agg(avg(F.round(F.col("How would you rate the Audio/Video quality?"),2)).alias("How would you rate the Audio/Video quality?"),\
-                             avg(F.round(F.col("How would you rate the engagement in the session?"),2)).alias("How would you rate the engagement in the session?"),\
-                             avg(F.round(F.col("How would you rate the host of the session?"),2)).alias("How would you rate the host of the session?"))
+                             .agg(avg(round(F.col("How would you rate the Audio/Video quality?"),2)).alias("How would you rate the Audio/Video quality?"),\
+                             avg(round(F.col("How would you rate the engagement in the session?"),2)).alias("How would you rate the engagement in the session?"),\
+                             avg(round(F.col("How would you rate the host of the session?"),2)).alias("How would you rate the host of the session?"))
 
  session_attendees_df_fd = session_attendees_df_fd.filter(F.col("exploded_feedbacks.label").isin("How would you rate the host of the session?","How would you rate the engagement in the session?"))
  session_attendees_df_fd = session_attendees_df_fd.groupBy("_id","userId","isSessionAttended").pivot("exploded_feedbacks.label")\
@@ -480,7 +480,8 @@ s3_object.delete()
 
 
 
-#  Send Email
+
+# Send Email
 kafka_producer = KafkaProducer(bootstrap_servers=config.get("KAFKA","kafka_url"))
 
 email_data = {"type":"email","email":{"to":config.get("EMAIL","to"),"cc":config.get("EMAIL","cc"),"subject":"MentorED - Daily report","body":"<div style='margin:auto;width:50%'><p style='text-align:center'><img style='height:250px;' class='cursor-pointer' alt='MentorED' src='https://mentoring-dev-storage.s3.ap-south-1.amazonaws.com/email/image/logo.png'></p><div><p>Hello , </p> Please find the User and Session Reports Attachment Links below ...<p><b>Mentor User Report:- </b>"+mentor_user_presigned_url+"</p><p><b>Mentee User Report:- </b>"+mentee_user_presigned_url+"</p><p><b>Session Report:- </b>"+session_presigned_url+"</p></div><div style='margin-top:100px'><div>Thanks & Regards</div><div>Team MentorED</div><div style='margin-top:20px;color:#b13e33'><div><p>Note:- </p><ul><li>FYI, The Attachment Link shared above will be having the expiry duration. Please use it before expires</li><li>Do not reply to this email. This email is sent from an unattended mailbox. Replies will not be read.</div><div>For any queries, please feel free to reach out to us at support@shikshalokam.org</li></ul></div></div></div></div>"}}
