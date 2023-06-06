@@ -281,8 +281,8 @@ if (session_attendees_df_fd.count() >=1) :
  session_attendees_df_fd = session_attendees_df_fd.groupBy("_id","userId","isSessionAttended").pivot("exploded_feedbacks.label")\
                           .agg(F.first("exploded_feedbacks.value"))
  session_attendees_df_fd = session_attendees_df_fd.groupBy("userId")\
-                          .agg(avg(F.round(F.col("How would you rate the host of the session?"),2)).alias("How would you rate the host of the session?"),\
-                          avg(F.round(F.col("How would you rate the engagement in the session?"),2)).alias("How would you rate the engagement in the session?"))
+                          .agg(avg(round(F.col("How would you rate the host of the session?"),2)).alias("How would you rate the host of the session?"),\
+                          avg(round(F.col("How would you rate the engagement in the session?"),2)).alias("How would you rate the engagement in the session?"))
  user_avg_mentor_rating_columns = [F.col("How would you rate the host of the session?"), F.col("How would you rate the engagement in the session?")]
  session_attendees_df_fd = session_attendees_df_fd.na.fill(0).withColumn(
     "Avg_Mentor_rating",
@@ -322,6 +322,8 @@ mentee_user_session_attendees_df = mentee_session_attendees_df.join(mentee_users
 mentee_user_session_attendees_df = mentee_user_session_attendees_df.na.fill(0,subset=["No_of_sessions_enrolled",\
                                    "No_of_sessions_attended"])
 
+# update mentee fields 
+mentee_user_session_attendees_df = mentee_user_session_attendees_df.withColumnRenamed("User Name","Mentee Name").withColumnRenamed("No_of_sessions_enrolled","No. of sessions enrolled in")
 mentee_user_session_attendees_df.repartition(1).write.format("csv").option("header",True).mode("overwrite").save(
     config.get("S3","mentee_user_path")
 )
@@ -478,10 +480,19 @@ s3_object.delete()
 
 
 
+# open the file in the write mode
+with open('output.csv', 'w') as f:
+    # create the csv writer
+    writer = csv.writer(f)
 
-# Send Email
-kafka_producer = KafkaProducer(bootstrap_servers=config.get("KAFKA","kafka_url"))
+    # write a row to the csv file
+    writer.writerow(["mentor_user_presigned_url","mentee_user_presigned_url","session_presigned_url"])
+    writer.writerow([mentor_user_presigned_url,mentee_user_presigned_url,session_presigned_url])
 
-email_data = {"type":"email","email":{"to":config.get("EMAIL","to"),"cc":config.get("EMAIL","cc"),"subject":"MentorED - Daily report","body":"<div style='margin:auto;width:50%'><p style='text-align:center'><img style='height:250px;' class='cursor-pointer' alt='MentorED' src='https://mentoring-dev-storage.s3.ap-south-1.amazonaws.com/email/image/logo.png'></p><div><p>Hello , </p> Please find the User and Session Reports Attachment Links below ...<p><b>Mentor User Report:- </b>"+mentor_user_presigned_url+"</p><p><b>Mentee User Report:- </b>"+mentee_user_presigned_url+"</p><p><b>Session Report:- </b>"+session_presigned_url+"</p></div><div style='margin-top:100px'><div>Thanks & Regards</div><div>Team MentorED</div><div style='margin-top:20px;color:#b13e33'><div><p>Note:- </p><ul><li>FYI, The Attachment Link shared above will be having the expiry duration. Please use it before expires</li><li>Do not reply to this email. This email is sent from an unattended mailbox. Replies will not be read.</div><div>For any queries, please feel free to reach out to us at support@shikshalokam.org</li></ul></div></div></div></div>"}}
-kafka_producer.send(config.get("KAFKA","notification_kafka_topic_name"), json.dumps(email_data, default=json_util.default).encode('utf-8'))
-kafka_producer.flush()
+
+# # Send Email
+# kafka_producer = KafkaProducer(bootstrap_servers=config.get("KAFKA","kafka_url"))
+
+# email_data = {"type":"email","email":{"to":config.get("EMAIL","to"),"cc":config.get("EMAIL","cc"),"subject":"MentorED - Daily report","body":"<div style='margin:auto;width:50%'><p style='text-align:center'><img style='height:250px;' class='cursor-pointer' alt='MentorED' src='https://mentoring-dev-storage.s3.ap-south-1.amazonaws.com/email/image/logo.png'></p><div><p>Hello , </p> Please find the User and Session Reports Attachment Links below ...<p><b>Mentor User Report:- </b>"+mentor_user_presigned_url+"</p><p><b>Mentee User Report:- </b>"+mentee_user_presigned_url+"</p><p><b>Session Report:- </b>"+session_presigned_url+"</p></div><div style='margin-top:100px'><div>Thanks & Regards</div><div>Team MentorED</div><div style='margin-top:20px;color:#b13e33'><div><p>Note:- </p><ul><li>FYI, The Attachment Link shared above will be having the expiry duration. Please use it before expires</li><li>Do not reply to this email. This email is sent from an unattended mailbox. Replies will not be read.</div><div>For any queries, please feel free to reach out to us at support@shikshalokam.org</li></ul></div></div></div></div>"}}
+# kafka_producer.send(config.get("KAFKA","notification_kafka_topic_name"), json.dumps(email_data, default=json_util.default).encode('utf-8'))
+# kafka_producer.flush()
