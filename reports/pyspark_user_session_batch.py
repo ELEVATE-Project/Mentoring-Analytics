@@ -22,7 +22,6 @@ from bson import json_util
 from datetime import date, timedelta, datetime
 today = date.today()
 currentDate =  today.strftime("%d.%m.%Y")
-# currentDate =  "07.06.2023"
 
 config_path = os.path.split(os.path.dirname(os.path.abspath(__file__)))
 config = ConfigParser(interpolation=ExtendedInterpolation())
@@ -307,14 +306,14 @@ if (session_attendees_df_fd.count() >=1) :
  final_mentor_user_sessions_df = final_mentor_user_sessions_df.withColumnRenamed("User Name","Mentor Name").withColumnRenamed("How would you rate the host of the session?","Mentor Rating").withColumnRenamed("How would you rate the engagement in the session?","Session Engagement Rating")
 
  final_mentor_user_sessions_df.repartition(1).write.format("csv").option("header",True).mode("overwrite").save(
-    config.get("S3","mentor_user_path")+str(currentDate)+"/"
+    config.get("S3","mentor_user_path")+"temp/"
  )
 else:
  #  update mentor headers
  mentor_user_sessions_df = mentor_user_sessions_df.withColumnRenamed("User Name","Mentor Name").withColumnRenamed("How would you rate the host of the session?","Mentor Rating").withColumnRenamed("How would you rate the engagement in the session?","Session Engagement Rating")
  
  mentor_user_sessions_df.repartition(1).write.format("csv").option("header",True).mode("overwrite").save(
-    config.get("S3","mentor_user_path")+str(currentDate)+"/"
+    config.get("S3","mentor_user_path")+"temp/"
  )
 
 ## Mentee User Report
@@ -329,7 +328,7 @@ mentee_user_session_attendees_df = mentee_user_session_attendees_df.na.fill(0,su
 # update mentee fields 
 mentee_user_session_attendees_df = mentee_user_session_attendees_df.withColumnRenamed("User Name","Mentee Name").withColumnRenamed("No_of_sessions_enrolled","No. of sessions enrolled in")
 mentee_user_session_attendees_df.repartition(1).write.format("csv").option("header",True).mode("overwrite").save(
-    config.get("S3","mentee_user_path")+str(currentDate)+"/"
+    config.get("S3","mentee_user_path")+"temp/"
 )
 
 ## Session Report
@@ -382,20 +381,20 @@ if (session_attendees_df_fd.count() >=1) :
  final_sessions_df_sr = final_sessions_df_sr.withColumnRenamed("How would you rate the Audio/Video quality?","Audio/Video quality rating").withColumnRenamed("How would you rate the engagement in the session?","Session Engagement Rating").withColumnRenamed("Host_UUID","Mentor UUID").withColumnRenamed("How would you rate the host of the session?","Mentor Rating")
 
  final_sessions_df_sr.repartition(1).write.format("csv").option("header",True).mode("overwrite").save(
-    config.get("S3","session_path")+str(currentDate)+"/"
+    config.get("S3","session_path")+"temp/"
  )
 else:
  # update sessions headers
  final_sessions_df = final_sessions_df.withColumnRenamed("How would you rate the Audio/Video quality?","Audio/Video quality rating").withColumnRenamed("How would you rate the engagement in the session?","Session Engagement Rating").withColumnRenamed("Host_UUID","Mentor UUID").withColumnRenamed("How would you rate the host of the session?","Mentor Rating")
  
  final_sessions_df.repartition(1).write.format("csv").option("header",True).mode("overwrite").save(
-    config.get("S3","session_path")
+    config.get("S3","session_path")+"temp/"
  )
 ##Generating Pre-signed url for all the reports stored in S3
 expiryInSec = config.get("S3","expiryTime")
-s3_session_folder="reports/session/"+str(currentDate)+"/"
-s3_mentor_user_folder="reports/mentor_user/"+str(currentDate)+"/"
-s3_mentee_user_folder="reports/mentee_user/"+str(currentDate)+"/"
+s3_session_folder="reports/session/"
+s3_mentor_user_folder="reports/mentor_user/"
+s3_mentee_user_folder="reports/mentee_user/"
 
 session_fileName = None
 mentorUser_fileName = None
@@ -414,7 +413,7 @@ for f in s3_bucket.objects.filter(Prefix=s3_session_folder):
 # Copying file to rename 
 source_object = {
     'Bucket': config.get("S3","bucket_name"),
-    'Key': s3_mentor_user_folder+mentorUser_fileName
+    'Key': s3_mentor_user_folder+"temp/"+mentorUser_fileName
 }
 
 destination_object = s3_mentor_user_folder+"Mentor User Report_"+str(currentDate)+".csv"
@@ -429,16 +428,10 @@ mentor_user_presigned_url = s3_presigned_client.generate_presigned_url(
         ExpiresIn = int(expiryInSec)
     )
 
-
-# Get the S3 object
-s3_object = s3_client.Object(config.get("S3","bucket_name"),s3_mentor_user_folder+mentorUser_fileName)
-# Delete the file
-s3_object.delete()
-
 # Copying file to rename 
 source_object = {
     'Bucket': config.get("S3","bucket_name"),
-    'Key': s3_mentee_user_folder+menteeUser_fileName
+    'Key': s3_mentee_user_folder+"temp/"+menteeUser_fileName
 }
 
 destination_object = s3_mentee_user_folder+"Mentee User Report_"+str(currentDate)+".csv"
@@ -453,17 +446,10 @@ mentee_user_presigned_url = s3_presigned_client.generate_presigned_url(
         ExpiresIn = int(expiryInSec)
     )
 
-
-# Get the S3 object
-s3_object = s3_client.Object(config.get("S3","bucket_name"),s3_mentor_user_folder+menteeUser_fileName)
-# Delete the file
-s3_object.delete()
-
-
 # Copying file to rename 
 source_object = {
     'Bucket': config.get("S3","bucket_name"),
-    'Key': s3_session_folder+session_fileName
+    'Key': s3_session_folder+"temp/"+session_fileName
 }
 
 destination_object = s3_session_folder+"Session Report_"+str(currentDate)+".csv"
@@ -476,14 +462,6 @@ session_presigned_url = s3_presigned_client.generate_presigned_url(
         Params={"Bucket": config.get("S3","bucket_name"), "Key": destination_object},
         ExpiresIn = int(expiryInSec)
     )
-
-
-# Get the S3 object
-s3_object = s3_client.Object(config.get("S3","bucket_name"),s3_session_folder+session_fileName)
-# Delete the file
-s3_object.delete()
-
-
 
 # Send Email
 kafka_producer = KafkaProducer(bootstrap_servers=config.get("KAFKA","kafka_url"))
