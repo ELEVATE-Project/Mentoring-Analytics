@@ -464,21 +464,11 @@ session_presigned_url = s3_presigned_client.generate_presigned_url(
     )
 
 
-# open the file in the write mode
-with open('output.csv', 'w') as f:
-    # create the csv writer
-    writer = csv.writer(f)
-
-    # write a row to the csv file
-    writer.writerow(["mentor_user_presigned_url","mentee_user_presigned_url","session_presigned_url"])
-    writer.writerow([mentor_user_presigned_url,mentee_user_presigned_url,session_presigned_url])
-
-
 # Send Email
-# kafka_producer = KafkaProducer(bootstrap_servers=config.get("KAFKA","kafka_url"))
+kafka_producer = KafkaProducer(bootstrap_servers=config.get("KAFKA","kafka_url"))
 
-# email_data = {"type":"email","email":{"to":config.get("EMAIL","to"),"cc":config.get("EMAIL","cc"),"subject":"MentorED - Daily report","body":"<div style='margin:auto;width:50%'><p style='text-align:center'><img style='height:250px;' class='cursor-pointer' alt='MentorED' src='https://mentoring-dev-storage.s3.ap-south-1.amazonaws.com/email/image/logo.png'></p><div><p>Hello , </p> Please find the User and Session Reports Attachment Links below ...<p><b>Mentor User Report:- </b>"+mentor_user_presigned_url+"</p><p><b>Mentee User Report:- </b>"+mentee_user_presigned_url+"</p><p><b>Session Report:- </b>"+session_presigned_url+"</p></div><div style='margin-top:100px'><div>Thanks & Regards</div><div>Team MentorED</div><div style='margin-top:20px;color:#b13e33'><div><p>Note:- </p><ul><li>FYI, The Attachment Link shared above will be having the expiry duration. Please use it before expires</li><li>Do not reply to this email. This email is sent from an unattended mailbox. Replies will not be read.</div><div>For any queries, please feel free to reach out to us at support@shikshalokam.org</li></ul></div></div></div></div>"}}
-# kafka_producer.send(config.get("KAFKA","notification_kafka_topic_name"), json.dumps(email_data, default=json_util.default).encode('utf-8'))
-# kafka_producer.flush()
+email_data = {"type":"email","email":{"to":config.get("EMAIL","to"),"cc":config.get("EMAIL","cc"),"subject":"MentorED - Daily report","body":"<div style='margin:auto;width:50%'><p style='text-align:center'><img style='height:250px;' class='cursor-pointer' alt='MentorED' src='https://mentoring-dev-storage.s3.ap-south-1.amazonaws.com/email/image/logo.png'></p><div><p>Hello , </p> Please find the User and Session Reports Attachment Links below ...<p><b>Mentor User Report:- </b>"+mentor_user_presigned_url+"</p><p><b>Mentee User Report:- </b>"+mentee_user_presigned_url+"</p><p><b>Session Report:- </b>"+session_presigned_url+"</p></div><div style='margin-top:100px'><div>Thanks & Regards</div><div>Team MentorED</div><div style='margin-top:20px;color:#b13e33'><div><p>Note:- </p><ul><li>FYI, The Attachment Link shared above will be having the expiry duration. Please use it before expires</li><li>Do not reply to this email. This email is sent from an unattended mailbox. Replies will not be read.</div><div>For any queries, please feel free to reach out to us at support@shikshalokam.org</li></ul></div></div></div></div>"}}
+kafka_producer.send(config.get("KAFKA","notification_kafka_topic_name"), json.dumps(email_data, default=json_util.default).encode('utf-8'))
+kafka_producer.flush()
 
 
