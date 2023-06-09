@@ -22,6 +22,7 @@ from bson import json_util
 from datetime import date, timedelta, datetime
 today = date.today()
 currentDate =  today.strftime("%d.%m.%Y")
+# currentDate =  "07.06.2023"
 
 config_path = os.path.split(os.path.dirname(os.path.abspath(__file__)))
 config = ConfigParser(interpolation=ExtendedInterpolation())
@@ -96,7 +97,6 @@ s3_client = boto3.resource("s3",
          aws_access_key_id=config.get("S3","aws_access_key"),
          aws_secret_access_key=config.get("S3","aws_secret_key"))
 s3_bucket = s3_client.Bucket(config.get("S3","bucket_name"))
-
 
 client = MongoClient(config.get('MONGO', 'mongo_url'))
 
@@ -482,6 +482,7 @@ session_presigned_url = s3_presigned_client.generate_presigned_url(
 s3_object = s3_client.Object(config.get("S3","bucket_name"),s3_session_folder+session_fileName)
 # Delete the file
 s3_object.delete()
+
 
 
 # Send Email
