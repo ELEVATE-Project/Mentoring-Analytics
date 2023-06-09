@@ -19,10 +19,9 @@ from pyspark import StorageLevel
 import boto3
 from kafka import KafkaConsumer, KafkaProducer
 from bson import json_util
-from datetime import date
+from datetime import date, timedelta, datetime
 today = date.today()
 currentDate =  today.strftime("%d.%m.%Y")
-
 
 config_path = os.path.split(os.path.dirname(os.path.abspath(__file__)))
 config = ConfigParser(interpolation=ExtendedInterpolation())
@@ -97,6 +96,7 @@ s3_client = boto3.resource("s3",
          aws_access_key_id=config.get("S3","aws_access_key"),
          aws_secret_access_key=config.get("S3","aws_secret_key"))
 s3_bucket = s3_client.Bucket(config.get("S3","bucket_name"))
+
 
 client = MongoClient(config.get('MONGO', 'mongo_url'))
 
@@ -304,17 +304,17 @@ if (session_attendees_df_fd.count() >=1) :
                                 "How would you rate the engagement in the session?"])
  
 # update mentor headers
- final_mentor_user_sessions_df = final_mentor_user_sessions_df.withColumnRenamed("User Name","Mentor Name").withColumnRenamed("How would you rate the host of the session?","Mentor Rating").withColumnRenamed("How would you rate the engagement in the session?","Session Rating")
+ final_mentor_user_sessions_df = final_mentor_user_sessions_df.withColumnRenamed("User Name","Mentor Name").withColumnRenamed("How would you rate the host of the session?","Mentor Rating").withColumnRenamed("How would you rate the engagement in the session?","Session Engagement Rating")
 
  final_mentor_user_sessions_df.repartition(1).write.format("csv").option("header",True).mode("overwrite").save(
-    config.get("S3","mentor_user_path")
+    config.get("S3","mentor_user_path")+str(currentDate)+"/"
  )
 else:
  #  update mentor headers
- mentor_user_sessions_df = mentor_user_sessions_df.withColumnRenamed("User Name","Mentor Name").withColumnRenamed("How would you rate the host of the session?","Mentor Rating").withColumnRenamed("How would you rate the engagement in the session?","Session Rating")
+ mentor_user_sessions_df = mentor_user_sessions_df.withColumnRenamed("User Name","Mentor Name").withColumnRenamed("How would you rate the host of the session?","Mentor Rating").withColumnRenamed("How would you rate the engagement in the session?","Session Engagement Rating")
  
  mentor_user_sessions_df.repartition(1).write.format("csv").option("header",True).mode("overwrite").save(
-    config.get("S3","mentor_user_path")
+    config.get("S3","mentor_user_path")+str(currentDate)+"/"
  )
 
 ## Mentee User Report
@@ -329,7 +329,7 @@ mentee_user_session_attendees_df = mentee_user_session_attendees_df.na.fill(0,su
 # update mentee fields 
 mentee_user_session_attendees_df = mentee_user_session_attendees_df.withColumnRenamed("User Name","Mentee Name").withColumnRenamed("No_of_sessions_enrolled","No. of sessions enrolled in")
 mentee_user_session_attendees_df.repartition(1).write.format("csv").option("header",True).mode("overwrite").save(
-    config.get("S3","mentee_user_path")
+    config.get("S3","mentee_user_path")+str(currentDate)+"/"
 )
 
 ## Session Report
@@ -382,7 +382,7 @@ if (session_attendees_df_fd.count() >=1) :
  final_sessions_df_sr = final_sessions_df_sr.withColumnRenamed("How would you rate the Audio/Video quality?","Audio/Video quality rating").withColumnRenamed("How would you rate the engagement in the session?","Session Engagement Rating").withColumnRenamed("Host_UUID","Mentor UUID").withColumnRenamed("How would you rate the host of the session?","Mentor Rating")
 
  final_sessions_df_sr.repartition(1).write.format("csv").option("header",True).mode("overwrite").save(
-    config.get("S3","session_path")
+    config.get("S3","session_path")+str(currentDate)+"/"
  )
 else:
  # update sessions headers
@@ -393,9 +393,10 @@ else:
  )
 ##Generating Pre-signed url for all the reports stored in S3
 expiryInSec = config.get("S3","expiryTime")
-s3_session_folder="reports/session/"
-s3_mentor_user_folder="reports/mentor_user/"
-s3_mentee_user_folder="reports/mentee_user/"
+s3_session_folder="reports/session/"+str(currentDate)+"/"
+s3_mentor_user_folder="reports/mentor_user/"+str(currentDate)+"/"
+s3_mentee_user_folder="reports/mentee_user/"+str(currentDate)+"/"
+
 session_fileName = None
 mentorUser_fileName = None
 menteeUser_fileName = None
@@ -483,10 +484,11 @@ s3_object = s3_client.Object(config.get("S3","bucket_name"),s3_session_folder+se
 s3_object.delete()
 
 
-
 # Send Email
 kafka_producer = KafkaProducer(bootstrap_servers=config.get("KAFKA","kafka_url"))
 
 email_data = {"type":"email","email":{"to":config.get("EMAIL","to"),"cc":config.get("EMAIL","cc"),"subject":"MentorED - Daily report","body":"<div style='margin:auto;width:50%'><p style='text-align:center'><img style='height:250px;' class='cursor-pointer' alt='MentorED' src='https://mentoring-dev-storage.s3.ap-south-1.amazonaws.com/email/image/logo.png'></p><div><p>Hello , </p> Please find the User and Session Reports Attachment Links below ...<p><b>Mentor User Report:- </b>"+mentor_user_presigned_url+"</p><p><b>Mentee User Report:- </b>"+mentee_user_presigned_url+"</p><p><b>Session Report:- </b>"+session_presigned_url+"</p></div><div style='margin-top:100px'><div>Thanks & Regards</div><div>Team MentorED</div><div style='margin-top:20px;color:#b13e33'><div><p>Note:- </p><ul><li>FYI, The Attachment Link shared above will be having the expiry duration. Please use it before expires</li><li>Do not reply to this email. This email is sent from an unattended mailbox. Replies will not be read.</div><div>For any queries, please feel free to reach out to us at support@shikshalokam.org</li></ul></div></div></div></div>"}}
 kafka_producer.send(config.get("KAFKA","notification_kafka_topic_name"), json.dumps(email_data, default=json_util.default).encode('utf-8'))
 kafka_producer.flush()
+
+
