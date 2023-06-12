@@ -392,9 +392,9 @@ else:
  )
 ##Generating Pre-signed url for all the reports stored in S3
 expiryInSec = config.get("S3","expiryTime")
-s3_session_folder="reports/session/"
-s3_mentor_user_folder="reports/mentor_user/"
-s3_mentee_user_folder="reports/mentee_user/"
+s3_session_folder = config.get("S3","s3_session_folder")
+s3_mentor_user_folder = config.get("S3","s3_mentor_user_folder")
+s3_mentee_user_folder = config.get("S3","s3_mentee_user_folder")
 
 session_fileName = None
 mentorUser_fileName = None
@@ -462,7 +462,6 @@ session_presigned_url = s3_presigned_client.generate_presigned_url(
         Params={"Bucket": config.get("S3","bucket_name"), "Key": destination_object},
         ExpiresIn = int(expiryInSec)
     )
-
 
 # Send Email
 kafka_producer = KafkaProducer(bootstrap_servers=config.get("KAFKA","kafka_url"))

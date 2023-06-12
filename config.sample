@@ -44,13 +44,19 @@ aws_region = {{S3_region_for_boto3}}
 
 bucket_name = {{S3_bucket_name}}
 
-mentor_user_path = ${base_path}/{{mentor_user_folder}}/
+mentor_user_path = ${base_path}/dev_reports/{{mentor_user_folder}}/
 
-mentee_user_path = ${base_path}/{{mentee_user_folder}}/
+mentee_user_path = ${base_path}/dev_reports/{{mentee_user_folder}}/
 
-session_path = ${base_path}/{{session_folder}}/
+session_path = ${base_path}dev_reports/{{session_folder}}/
 
 expiryTime = 604800
+
+s3_session_folder= reports/dev_reports/session/
+
+s3_mentor_user_folder=reports/dev_reports/mentor_user/
+
+s3_mentee_user_folder=reports/dev_reports/mentee_user/
 
 [KAFKA]
 
