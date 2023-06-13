@@ -272,7 +272,7 @@ if (session_attendees_df_fd.count() >=1) :
  session_attendees_df_fd_sr = session_attendees_df_fd_sr.groupBy("_id","sessionId").pivot("exploded_feedbacks.label")\
                              .agg(F.first("exploded_feedbacks.value"))
  session_attendees_df_fd_sr = session_attendees_df_fd_sr.groupBy("sessionId")\
-                             .agg(avg(round(F.col("How would you rate the Audio/Video quality?"),2)).alias("How would you rate the Audio/Video quality?"),\
+                             .agg(round(avg(F.col("How would you rate the Audio/Video quality?")),2).alias("How would you rate the Audio/Video quality?"),\
                              round(avg(F.col("How would you rate the engagement in the session?")),2).alias("How would you rate the engagement in the session?"),\
                              round(avg(F.col("How would you rate the host of the session?")),2).alias("How would you rate the host of the session?"))
 
