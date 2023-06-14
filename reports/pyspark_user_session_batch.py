@@ -409,6 +409,11 @@ for f in s3_bucket.objects.filter(Prefix=s3_session_folder):
     if str(f.key.split('/')[-1]).endswith(".csv"):
      session_fileName = f.key.split('/')[-1]
 
+reportPrefix = ""
+if "dev_reports" in s3_session_folder or "dev_reports" in s3_mentor_user_folder or "dev_reports" in s3_mentee_user_folder:
+  reportPrefix = "DEV-"
+else:
+  reportPrefix = ""
 
 # Copying file to rename 
 source_object = {
@@ -416,7 +421,7 @@ source_object = {
     'Key': s3_mentor_user_folder+"temp/"+mentorUser_fileName
 }
 
-destination_object = s3_mentor_user_folder+"Mentor User Report_"+str(currentDate)+".csv"
+destination_object = s3_mentor_user_folder+str(reportPrefix)+"Mentor User Report_"+str(currentDate)+".csv"
 copy_source = source_object
 
 
@@ -434,7 +439,7 @@ source_object = {
     'Key': s3_mentee_user_folder+"temp/"+menteeUser_fileName
 }
 
-destination_object = s3_mentee_user_folder+"Mentee User Report_"+str(currentDate)+".csv"
+destination_object = s3_mentee_user_folder+str(reportPrefix)+"Mentee User Report_"+str(currentDate)+".csv"
 copy_source = source_object
 
 s3_client.meta.client.copy(copy_source,config.get("S3","bucket_name"), destination_object)
@@ -452,7 +457,7 @@ source_object = {
     'Key': s3_session_folder+"temp/"+session_fileName
 }
 
-destination_object = s3_session_folder+"Session Report_"+str(currentDate)+".csv"
+destination_object = s3_session_folder+str(reportPrefix)+"Session Report_"+str(currentDate)+".csv"
 copy_source = source_object
 
 s3_client.meta.client.copy(copy_source,config.get("S3","bucket_name"), destination_object)
@@ -462,6 +467,9 @@ session_presigned_url = s3_presigned_client.generate_presigned_url(
         Params={"Bucket": config.get("S3","bucket_name"), "Key": destination_object},
         ExpiresIn = int(expiryInSec)
     )
+
+
+
 
 # Send Email
 kafka_producer = KafkaProducer(bootstrap_servers=config.get("KAFKA","kafka_url"))
