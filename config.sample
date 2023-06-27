@@ -69,3 +69,5 @@ notification_kafka_topic_name = {{notifications_kafka_topic_name}}
 to = {{multiple_to_email_address_by_comma}}
 
 cc = {{multiple_cc_email_address_by_comma}}
+
+subject = {{email subject}}
