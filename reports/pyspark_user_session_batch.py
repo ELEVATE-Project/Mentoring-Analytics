@@ -106,8 +106,6 @@ mentoring_db = client[config.get('MONGO','mentoring_database_name')]
 session_attendees_collec = mentoring_db[config.get('MONGO','session_attendees_collection')]
 sessions_collec = mentoring_db[config.get('MONGO','sessions_collection')]
 
-# fetch all the feedback questions from mongo 
-questionList = session_attendees_collec.distinct("feedbacks.label")
 
 ##Mentor User Report
 mentor_sessions_cursorMongo = sessions_collec.aggregate(
@@ -274,7 +272,9 @@ session_attendees_df_fd = session_attendees_df.filter(size("feedbacks")>=1)
 if (session_attendees_df_fd.count() >=1) :
  session_attendees_df_fd = session_attendees_df_fd.withColumn("exploded_feedbacks",F.explode_outer(F.col("feedbacks")))
  
- session_attendees_df_fd_sr = session_attendees_df_fd.filter(F.col("exploded_feedbacks.label").isin(*questionList))
+ session_attendees_df_fd_sr = session_attendees_df_fd.filter(F.col("exploded_feedbacks.label").isin(\
+                             "How would you rate the Audio/Video quality?","How would you rate the engagement in the session?",\
+                             "How would you rate the host of the session?"))
  
  session_attendees_df_fd_sr = session_attendees_df_fd_sr.groupBy("_id","sessionId").pivot("exploded_feedbacks.label")\
                              .agg(F.first("exploded_feedbacks.value"))
@@ -283,17 +283,15 @@ if (session_attendees_df_fd.count() >=1) :
  session_attendees_df_fd_sr = session_attendees_df_fd_sr.groupBy("sessionId")\
                              .agg(round(avg(F.col("How would you rate the Audio/Video quality?")),2).alias("How would you rate the Audio/Video quality?"),\
                              round(avg(F.col("How would you rate the engagement in the session?")),2).alias("How would you rate the engagement in the session?"),\
-                             round(avg(F.col("How would you rate the host of the session?")),2).alias("How would you rate the host of the session?"),\
-                             round(avg(F.col("How relevant was the session to your role?")),2).alias("How relevant was the session to your role?"))
+                             round(avg(F.col("How would you rate the host of the session?")),2).alias("How would you rate the host of the session?"))
  
- session_attendees_df_fd = session_attendees_df_fd.filter(F.col("exploded_feedbacks.label").isin("How would you rate the host of the session?","How would you rate the engagement in the session?","How relevant was the session to your role?"))
+ session_attendees_df_fd = session_attendees_df_fd.filter(F.col("exploded_feedbacks.label").isin("How would you rate the host of the session?","How would you rate the engagement in the session?"))
  session_attendees_df_fd = session_attendees_df_fd.groupBy("_id","userId","isSessionAttended").pivot("exploded_feedbacks.label")\
                           .agg(F.first("exploded_feedbacks.value"))
  
  session_attendees_df_fd = session_attendees_df_fd.groupBy("userId").agg(
     round(avg(F.col("How would you rate the host of the session?")), 2).alias("How would you rate the host of the session?"),
-    round(avg(F.col("How would you rate the engagement in the session?")), 2).alias("How would you rate the engagement in the session?"),
-    round(avg(F.col("How relevant was the session to your role?")), 2).alias("How relevant was the session to your role?")
+    round(avg(F.col("How would you rate the engagement in the session?")), 2).alias("How would you rate the engagement in the session?")
  )
  
  user_avg_mentor_rating_columns = [F.col("How would you rate the host of the session?"), F.col("How would you rate the engagement in the session?")]
