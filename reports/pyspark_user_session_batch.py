@@ -223,8 +223,8 @@ users_df = spark.createDataFrame(users_rdd,users_schema)
 
 users_df = users_df.withColumn("exploded_location",F.explode_outer(F.col("location")))
 
-users_df = users_df.select(F.col("_id").isNotNull().alias("UUID"),
-                           F.col("name").isNotNull().alias("User Name"),
+users_df = users_df.select(F.col("_id").alias("UUID").isNotNull(),
+                           F.col("name").alias("User Name").isNotNull(),
                            F.col("exploded_location.label").alias("State"),
                            concat_ws(",",F.col("designation.label")).alias("Designation"),
                            F.col("experience").alias("Years_of_Experience"),
@@ -306,6 +306,7 @@ if (session_attendees_df_fd.count() >=1) :
         2
     )
 )
+ 
 
  final_mentor_user_sessions_df = mentor_user_sessions_df.join(session_attendees_df_fd,\
                                 mentor_user_sessions_df["UUID"]==session_attendees_df_fd["userId"],how="left")\
