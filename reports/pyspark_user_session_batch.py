@@ -107,7 +107,7 @@ session_attendees_collec = mentoring_db[config.get('MONGO','session_attendees_co
 sessions_collec = mentoring_db[config.get('MONGO','sessions_collection')]
 
 
-##Mentor User Report
+##Mentor data fetch from DB
 mentor_sessions_cursorMongo = sessions_collec.aggregate(
         [{"$match": {"deleted": {"$exists":True,"$ne":None}}},
                  {
@@ -127,6 +127,7 @@ mentor_sessions_cursorMongo = sessions_collec.aggregate(
                  }
          ])
 
+# Create mentor schema 
 mentor_sessions_schema = StructType([
         StructField("_id", StringType(), True),
         StructField("userId", StringType(), True),
@@ -168,12 +169,15 @@ mentor_sessions_schema = StructType([
 ])
 mentor_sessions_rdd = spark.sparkContext.parallelize(list(mentor_sessions_cursorMongo))
 sessions_df = spark.createDataFrame(mentor_sessions_rdd,mentor_sessions_schema)
+
 sessions_df = sessions_df.withColumn("startDateUtc_timestamp",to_timestamp(col("startDateUtc")))\
                          .withColumn("endDateUtc_timestamp",to_timestamp(col("endDateUtc")))\
                          .withColumn("Duration_of_session_min",round((col("endDateUtc_timestamp").cast("long") - col("startDateUtc_timestamp").cast("long"))/60))
 mentor_sessions_df = sessions_df.select(F.col("_id").alias("sessionId"),"userId","status","feedbacks")
+
 mentoru_sessions_df = mentor_sessions_df.groupBy("userId").agg(count(when(F.col("status") == "completed",True))\
                        .alias("No_of_sessions_conducted"),F.count("sessionId").alias("No_of_session_created"))
+
 users_cursorMongo = users_collec.aggregate(
         [{"$match": {"deleted": {"$exists":True,"$ne":None}}},
          {
@@ -188,7 +192,6 @@ users_cursorMongo = users_collec.aggregate(
            }
          }
         ])
-
         
 users_schema = StructType([
     StructField("_id", StringType(), True),
@@ -220,8 +223,8 @@ users_df = spark.createDataFrame(users_rdd,users_schema)
 
 users_df = users_df.withColumn("exploded_location",F.explode_outer(F.col("location")))
 
-users_df = users_df.select(F.col("_id").alias("UUID"),
-                           F.col("name").alias("User Name"),
+users_df = users_df.select(F.col("_id").isNotNull().alias("UUID"),
+                           F.col("name").isNotNull().alias("User Name"),
                            F.col("exploded_location.label").alias("State"),
                            concat_ws(",",F.col("designation.label")).alias("Designation"),
                            F.col("experience").alias("Years_of_Experience"),
@@ -303,6 +306,7 @@ if (session_attendees_df_fd.count() >=1) :
         2
     )
 )
+
  final_mentor_user_sessions_df = mentor_user_sessions_df.join(session_attendees_df_fd,\
                                 mentor_user_sessions_df["UUID"]==session_attendees_df_fd["userId"],how="left")\
                                 .select(mentor_user_sessions_df["*"],session_attendees_df_fd["How would you rate the host of the session?"],\
