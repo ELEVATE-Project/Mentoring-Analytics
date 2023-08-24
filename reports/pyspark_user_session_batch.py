@@ -223,8 +223,8 @@ users_df = spark.createDataFrame(users_rdd,users_schema)
 
 users_df = users_df.withColumn("exploded_location",F.explode_outer(F.col("location")))
 
-users_df = users_df.select(F.col("_id").alias("UUID").isNotNull(),
-                           F.col("name").alias("User Name").isNotNull(),
+users_df = users_df.select(F.col("_id").alias("UUID"),
+                           F.col("name").alias("User Name"),
                            F.col("exploded_location.label").alias("State"),
                            concat_ws(",",F.col("designation.label")).alias("Designation"),
                            F.col("experience").alias("Years_of_Experience"),
