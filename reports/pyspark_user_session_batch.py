@@ -540,7 +540,6 @@ session_presigned_url = s3_presigned_client.generate_presigned_url(
 with open('output.csv', 'w') as f:
     # create the csv writer
     writer = csv.writer(f)
-
     # write a row to the csv file
     writer.writerow(["mentor_user_presigned_url","mentee_user_presigned_url","session_presigned_url"])
     writer.writerow([mentor_user_presigned_url,mentee_user_presigned_url,session_presigned_url])
