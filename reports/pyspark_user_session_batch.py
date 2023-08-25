@@ -169,15 +169,12 @@ mentor_sessions_schema = StructType([
 ])
 mentor_sessions_rdd = spark.sparkContext.parallelize(list(mentor_sessions_cursorMongo))
 sessions_df = spark.createDataFrame(mentor_sessions_rdd,mentor_sessions_schema)
-
 sessions_df = sessions_df.withColumn("startDateUtc_timestamp",to_timestamp(col("startDateUtc")))\
                          .withColumn("endDateUtc_timestamp",to_timestamp(col("endDateUtc")))\
                          .withColumn("Duration_of_session_min",round((col("endDateUtc_timestamp").cast("long") - col("startDateUtc_timestamp").cast("long"))/60))
 mentor_sessions_df = sessions_df.select(F.col("_id").alias("sessionId"),"userId","status","feedbacks")
-
 mentoru_sessions_df = mentor_sessions_df.groupBy("userId").agg(count(when(F.col("status") == "completed",True))\
                        .alias("No_of_sessions_conducted"),F.count("sessionId").alias("No_of_session_created"))
-
 users_cursorMongo = users_collec.aggregate(
         [{"$match": {"deleted": {"$exists":True,"$ne":None}}},
          {
@@ -192,6 +189,7 @@ users_cursorMongo = users_collec.aggregate(
            }
          }
         ])
+
         
 users_schema = StructType([
     StructField("_id", StringType(), True),
@@ -306,7 +304,7 @@ if (session_attendees_df_fd.count() >=1) :
         2
     )
 )
- 
+
 
  final_mentor_user_sessions_df = mentor_user_sessions_df.join(session_attendees_df_fd,\
                                 mentor_user_sessions_df["UUID"]==session_attendees_df_fd["userId"],how="left")\
@@ -492,8 +490,8 @@ with open('output.csv', 'w') as f:
     writer.writerow([mentor_user_presigned_url,mentee_user_presigned_url,session_presigned_url])
 
 # Send Email
-kafka_producer = KafkaProducer(bootstrap_servers=config.get("KAFKA","kafka_url"))
+# kafka_producer = KafkaProducer(bootstrap_servers=config.get("KAFKA","kafka_url"))
 
-email_data = {"type":"email","email":{"to":config.get("EMAIL","to"),"cc":config.get("EMAIL","cc"),"subject": config.get("EMAIL","subject"),"body":"<div style='margin:auto;width:50%'><p style='text-align:center'><img style='height:250px;' class='cursor-pointer' alt='MentorED' src='"+config.get('EMAIL','logo')+"'></p><div><p>Hello , </p> Please find the User and Session Reports Attachment Links below ...<p><table style='width:50%'><tr><td><b>Mentor User Report</b></td><td><a href='"+mentor_user_presigned_url+"'> click here</a></td></tr><tr><td><b>Mentee User Report</b></td><td><a href='"+mentee_user_presigned_url+"'> click here</a></td></tr><tr><td><b>Session Report</b></td><td><a href='"+session_presigned_url+"'> click here</a></td></tr></table></div><div style='margin-top:100px'><div>Thanks & Regards</div><div>Team MentorED</div><div style='margin-top:20px;color:#b13e33'><div><p>Note:- </p><ul><li>FYI, The Attachment Link shared above will be having the expiry duration. Please use it before expires</li><li>Do not reply to this email. This email is sent from an unattended mailbox. Replies will not be read.</div><div>For any queries, please feel free to reach out to us at "+config.get("EMAIL","supportEmail")+"</li></ul></div></div></div></div>"}}
-kafka_producer.send(config.get("KAFKA","notification_kafka_topic_name"), json.dumps(email_data, default=json_util.default).encode('utf-8'))
-kafka_producer.flush()
+# email_data = {"type":"email","email":{"to":config.get("EMAIL","to"),"cc":config.get("EMAIL","cc"),"subject": config.get("EMAIL","subject"),"body":"<div style='margin:auto;width:50%'><p style='text-align:center'><img style='height:250px;' class='cursor-pointer' alt='MentorED' src='"+config.get('EMAIL','logo')+"'></p><div><p>Hello , </p> Please find the User and Session Reports Attachment Links below ...<p><table style='width:50%'><tr><td><b>Mentor User Report</b></td><td><a href='"+mentor_user_presigned_url+"'> click here</a></td></tr><tr><td><b>Mentee User Report</b></td><td><a href='"+mentee_user_presigned_url+"'> click here</a></td></tr><tr><td><b>Session Report</b></td><td><a href='"+session_presigned_url+"'> click here</a></td></tr></table></div><div style='margin-top:100px'><div>Thanks & Regards</div><div>Team MentorED</div><div style='margin-top:20px;color:#b13e33'><div><p>Note:- </p><ul><li>FYI, The Attachment Link shared above will be having the expiry duration. Please use it before expires</li><li>Do not reply to this email. This email is sent from an unattended mailbox. Replies will not be read.</div><div>For any queries, please feel free to reach out to us at "+config.get("EMAIL","supportEmail")+"</li></ul></div></div></div></div>"}}
+# kafka_producer.send(config.get("KAFKA","notification_kafka_topic_name"), json.dumps(email_data, default=json_util.default).encode('utf-8'))
+# kafka_producer.flush()
