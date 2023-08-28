@@ -277,17 +277,9 @@ session_attendees_df = spark.createDataFrame(session_attendees_rdd,session_atten
 session_attendees_df_fd = session_attendees_df.filter(size("feedbacks")>=1)
 
 if (session_attendees_df_fd.count() >=1) :
-#  session_attendees_df_fd.printSchema()
-#  session_attendees_df_fd.show()
+ 
  session_attendees_df_fd = session_attendees_df_fd.withColumn("exploded_feedbacks",F.explode_outer(F.col("feedbacks")))
 
-#  session_attendees_df_fd.printSchema()
-
-
- 
-#  session_attendees_df_fd_sr = session_attendees_df_fd.filter(F.col("exploded_feedbacks.label").isin(\
-#                              "How would you rate the Audio/Video quality?","How would you rate the engagement in the session?",\
-#                              "How would you rate the host of the session?","How relevant was the session to your role?"))
  session_attendees_df_fd_sr = session_attendees_df_fd.filter(F.col("exploded_feedbacks.label").isin(*distinct_feedback_questions))
  
 
@@ -368,25 +360,33 @@ mentee_session_attendees_df = session_attendees_df.select(F.col("_id").alias("se
                                                     F.col("To what extent were you able to learn new skill or concept in the session?").alias("To what extent were you able to learn new skill or concept in the session?"),\
                                                     F.col("To what extent did you feel comfortable sharing your thoughts in the session?").alias("To what extent did you feel comfortable sharing your thoughts in the session?") )
 
-mentee_session_attendees_df = mentee_session_attendees_df.groupBy("userId").agg(count(when(F.col("isSessionAttended") == True,True))\
-                       .alias("No_of_sessions_attended"),F.count("sessionAttendeesId").alias("No_of_sessions_enrolled"),\
-                        F.count("How relevant was the session to your role?").alias("How relevant was the session to your role?"),\
-                        F.count("To what extent were you able to learn new skill or concept in the session?").alias("To what extent were you able to learn new skill or concept in the session?"),\
-                        F.count("To what extent did you feel comfortable sharing your thoughts in the session?").alias("To what extent did you feel comfortable sharing your thoughts in the session?")
+mentee_session_attendees_agg_df = mentee_session_attendees_df.groupBy("userId").agg(count(when(F.col("isSessionAttended") == True,True))\
+                       .alias("No_of_sessions_attended"),F.count("sessionAttendeesId").alias("No_of_sessions_enrolled"),
                         )
 
+mentee_session_attendees_agg_df = mentee_session_attendees_agg_df.withColumnRenamed("userId", "menteeUserId")
+
+mentee_session_attendees_df = mentee_session_attendees_df.join(mentee_session_attendees_agg_df,mentee_session_attendees_agg_df['menteeUserId'] == mentee_session_attendees_df['userId'],how="left")
+
+mentee_session_attendees_df = mentee_session_attendees_df.drop("menteeUserId")
+
+# Group by userId
+mentee_session_attendees_df = mentee_session_attendees_df.groupBy("userId").agg(
+    F.first("No_of_sessions_attended").alias("No_of_sessions_attended"),
+    F.first("No_of_sessions_enrolled").alias("No_of_sessions_enrolled"),
+    F.first("How relevant was the session to your role?").alias("How relevant was the session to your role?"),
+    F.first("To what extent were you able to learn new skill or concept in the session?").alias("To what extent were you able to learn new skill or concept in the session?"),
+    F.first("To what extent did you feel comfortable sharing your thoughts in the session?").alias("To what extent did you feel comfortable sharing your thoughts in the session?")
+)
 
 mentee_user_session_attendees_df = mentee_session_attendees_df.join(mentee_users_df,mentee_users_df["UUID"] == mentee_session_attendees_df["userId"],how="left")\
                 .select(mentee_users_df["*"],mentee_session_attendees_df["No_of_sessions_enrolled"],mentee_session_attendees_df["No_of_sessions_attended"],\
                         mentee_session_attendees_df["How relevant was the session to your role?"],\
                         mentee_session_attendees_df["To what extent were you able to learn new skill or concept in the session?"],\
-                        mentee_session_attendees_df["To what extent did you feel comfortable sharing your thoughts in the session?"])
+                        mentee_session_attendees_df["To what extent did you feel comfortable sharing your thoughts in the session?"]
+                        )
 mentee_user_session_attendees_df = mentee_user_session_attendees_df.na.fill(0,subset=["No_of_sessions_enrolled",\
                                    "No_of_sessions_attended"])
-# mentee_user_session_attendees_df.show()
-# mentee_user_session_attendees_df.show()
-# sys.exit()
-# mentee_user_session_attendees_df = mentee_user_session_attendees_df.join(session_attendees_df_fd_sr, on="common_column", how="inner")
 
 # update mentee fields 
 mentee_user_session_attendees_df = mentee_user_session_attendees_df.withColumnRenamed("User Name","Mentee Name").withColumnRenamed("No_of_sessions_enrolled","No. of sessions enrolled in")
