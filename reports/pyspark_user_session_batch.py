@@ -106,6 +106,12 @@ mentoring_db = client[config.get('MONGO','mentoring_database_name')]
 session_attendees_collec = mentoring_db[config.get('MONGO','session_attendees_collection')]
 sessions_collec = mentoring_db[config.get('MONGO','sessions_collection')]
 
+# fetch the list of distinct feedback questions attended by the session attendees 
+distinct_feedback_questions_cursorMongo = session_attendees_collec.distinct("feedbacks.label")
+distinct_feedback_questions = []
+for index in distinct_feedback_questions_cursorMongo:
+  distinct_feedback_questions.append(index)
+
 
 ##Mentor data fetch from DB
 mentor_sessions_cursorMongo = sessions_collec.aggregate(
@@ -271,25 +277,47 @@ session_attendees_df = spark.createDataFrame(session_attendees_rdd,session_atten
 session_attendees_df_fd = session_attendees_df.filter(size("feedbacks")>=1)
 
 if (session_attendees_df_fd.count() >=1) :
+#  session_attendees_df_fd.printSchema()
+#  session_attendees_df_fd.show()
  session_attendees_df_fd = session_attendees_df_fd.withColumn("exploded_feedbacks",F.explode_outer(F.col("feedbacks")))
+
+#  session_attendees_df_fd.printSchema()
+
+
  
- session_attendees_df_fd_sr = session_attendees_df_fd.filter(F.col("exploded_feedbacks.label").isin(\
-                             "How would you rate the Audio/Video quality?","How would you rate the engagement in the session?",\
-                             "How would you rate the host of the session?"))
+#  session_attendees_df_fd_sr = session_attendees_df_fd.filter(F.col("exploded_feedbacks.label").isin(\
+#                              "How would you rate the Audio/Video quality?","How would you rate the engagement in the session?",\
+#                              "How would you rate the host of the session?","How relevant was the session to your role?"))
+ session_attendees_df_fd_sr = session_attendees_df_fd.filter(F.col("exploded_feedbacks.label").isin(*distinct_feedback_questions))
  
- session_attendees_df_fd_sr = session_attendees_df_fd_sr.groupBy("_id","sessionId").pivot("exploded_feedbacks.label")\
+
+ session_attendees_df_fd_sr = session_attendees_df_fd_sr.groupBy("_id","sessionId","userId").pivot("exploded_feedbacks.label")\
                              .agg(F.first("exploded_feedbacks.value"))
  
+  
+ mentee_questions = ["How relevant was the session to your role?","To what extent were you able to learn new skill or concept in the session?","To what extent did you feel comfortable sharing your thoughts in the session?"]
  
+ for index in mentee_questions:
+   if index not in distinct_feedback_questions:
+     session_attendees_df_fd_sr = session_attendees_df_fd_sr.withColumn(index, F.lit(0))
+
+
  session_attendees_df_fd_sr = session_attendees_df_fd_sr.groupBy("sessionId")\
                              .agg(round(avg(F.col("How would you rate the Audio/Video quality?")),2).alias("How would you rate the Audio/Video quality?"),\
                              round(avg(F.col("How would you rate the engagement in the session?")),2).alias("How would you rate the engagement in the session?"),\
-                             round(avg(F.col("How would you rate the host of the session?")),2).alias("How would you rate the host of the session?"))
- 
+                             round(avg(F.col("How would you rate the host of the session?")),2).alias("How would you rate the host of the session?"),\
+                             round(avg(F.col("How relevant was the session to your role?")),2).alias("How relevant was the session to your role?"),\
+                             round(avg(F.col("To what extent were you able to learn new skill or concept in the session?")),2).alias("To what extent were you able to learn new skill or concept in the session?"),\
+                             round(avg(F.col("To what extent did you feel comfortable sharing your thoughts in the session?")),2).alias("To what extent did you feel comfortable sharing your thoughts in the session?"))
+
+#  session_attendees_df_fd_sr.show()
+
+#  sys.exit()
  session_attendees_df_fd = session_attendees_df_fd.filter(F.col("exploded_feedbacks.label").isin("How would you rate the host of the session?","How would you rate the engagement in the session?"))
  session_attendees_df_fd = session_attendees_df_fd.groupBy("_id","userId","isSessionAttended").pivot("exploded_feedbacks.label")\
                           .agg(F.first("exploded_feedbacks.value"))
  
+
  session_attendees_df_fd = session_attendees_df_fd.groupBy("userId").agg(
     round(avg(F.col("How would you rate the host of the session?")), 2).alias("How would you rate the host of the session?"),
     round(avg(F.col("How would you rate the engagement in the session?")), 2).alias("How would you rate the engagement in the session?")
@@ -328,14 +356,37 @@ else:
     config.get("S3","mentor_user_path")+"temp/"
  )
 
+session_attendees_df = session_attendees_df.join(session_attendees_df_fd_sr,session_attendees_df['sessionId']==session_attendees_df_fd_sr['sessionId'],how="left")\
+                        .select(session_attendees_df["*"],session_attendees_df_fd_sr["How relevant was the session to your role?"],\
+                                session_attendees_df_fd_sr["To what extent were you able to learn new skill or concept in the session?"],\
+                                session_attendees_df_fd_sr["To what extent did you feel comfortable sharing your thoughts in the session?"])
+
+
 ## Mentee User Report
-mentee_session_attendees_df = session_attendees_df.select(F.col("_id").alias("sessionAttendeesId"),"userId","isSessionAttended","feedbacks")
+mentee_session_attendees_df = session_attendees_df.select(F.col("_id").alias("sessionAttendeesId"),"userId","isSessionAttended","feedbacks",\
+                                                    F.col("How relevant was the session to your role?").alias("How relevant was the session to your role?"),\
+                                                    F.col("To what extent were you able to learn new skill or concept in the session?").alias("To what extent were you able to learn new skill or concept in the session?"),\
+                                                    F.col("To what extent did you feel comfortable sharing your thoughts in the session?").alias("To what extent did you feel comfortable sharing your thoughts in the session?") )
+
 mentee_session_attendees_df = mentee_session_attendees_df.groupBy("userId").agg(count(when(F.col("isSessionAttended") == True,True))\
-                       .alias("No_of_sessions_attended"),F.count("sessionAttendeesId").alias("No_of_sessions_enrolled"))
+                       .alias("No_of_sessions_attended"),F.count("sessionAttendeesId").alias("No_of_sessions_enrolled"),\
+                        F.count("How relevant was the session to your role?").alias("How relevant was the session to your role?"),\
+                        F.count("To what extent were you able to learn new skill or concept in the session?").alias("To what extent were you able to learn new skill or concept in the session?"),\
+                        F.count("To what extent did you feel comfortable sharing your thoughts in the session?").alias("To what extent did you feel comfortable sharing your thoughts in the session?")
+                        )
+
+
 mentee_user_session_attendees_df = mentee_session_attendees_df.join(mentee_users_df,mentee_users_df["UUID"] == mentee_session_attendees_df["userId"],how="left")\
-                .select(mentee_users_df["*"],mentee_session_attendees_df["No_of_sessions_enrolled"],mentee_session_attendees_df["No_of_sessions_attended"])
+                .select(mentee_users_df["*"],mentee_session_attendees_df["No_of_sessions_enrolled"],mentee_session_attendees_df["No_of_sessions_attended"],\
+                        mentee_session_attendees_df["How relevant was the session to your role?"],\
+                        mentee_session_attendees_df["To what extent were you able to learn new skill or concept in the session?"],\
+                        mentee_session_attendees_df["To what extent did you feel comfortable sharing your thoughts in the session?"])
 mentee_user_session_attendees_df = mentee_user_session_attendees_df.na.fill(0,subset=["No_of_sessions_enrolled",\
                                    "No_of_sessions_attended"])
+# mentee_user_session_attendees_df.show()
+# mentee_user_session_attendees_df.show()
+# sys.exit()
+# mentee_user_session_attendees_df = mentee_user_session_attendees_df.join(session_attendees_df_fd_sr, on="common_column", how="inner")
 
 # update mentee fields 
 mentee_user_session_attendees_df = mentee_user_session_attendees_df.withColumnRenamed("User Name","Mentee Name").withColumnRenamed("No_of_sessions_enrolled","No. of sessions enrolled in")
@@ -490,8 +541,8 @@ with open('output.csv', 'w') as f:
     writer.writerow([mentor_user_presigned_url,mentee_user_presigned_url,session_presigned_url])
 
 # Send Email
-kafka_producer = KafkaProducer(bootstrap_servers=config.get("KAFKA","kafka_url"))
+# kafka_producer = KafkaProducer(bootstrap_servers=config.get("KAFKA","kafka_url"))
 
-email_data = {"type":"email","email":{"to":config.get("EMAIL","to"),"cc":config.get("EMAIL","cc"),"subject": config.get("EMAIL","subject"),"body":"<div style='margin:auto;width:50%'><p style='text-align:center'><img style='height:250px;' class='cursor-pointer' alt='MentorED' src='"+config.get('EMAIL','logo')+"'></p><div><p>Hello , </p> Please find the User and Session Reports Attachment Links below ...<p><table style='width:50%'><tr><td><b>Mentor User Report</b></td><td><a href='"+mentor_user_presigned_url+"'> click here</a></td></tr><tr><td><b>Mentee User Report</b></td><td><a href='"+mentee_user_presigned_url+"'> click here</a></td></tr><tr><td><b>Session Report</b></td><td><a href='"+session_presigned_url+"'> click here</a></td></tr></table></div><div style='margin-top:100px'><div>Thanks & Regards</div><div>Team MentorED</div><div style='margin-top:20px;color:#b13e33'><div><p>Note:- </p><ul><li>FYI, The Attachment Link shared above will be having the expiry duration. Please use it before expires</li><li>Do not reply to this email. This email is sent from an unattended mailbox. Replies will not be read.</div><div>For any queries, please feel free to reach out to us at "+config.get("EMAIL","supportEmail")+"</li></ul></div></div></div></div>"}}
-kafka_producer.send(config.get("KAFKA","notification_kafka_topic_name"), json.dumps(email_data, default=json_util.default).encode('utf-8'))
-kafka_producer.flush()
+# email_data = {"type":"email","email":{"to":config.get("EMAIL","to"),"cc":config.get("EMAIL","cc"),"subject": config.get("EMAIL","subject"),"body":"<div style='margin:auto;width:50%'><p style='text-align:center'><img style='height:250px;' class='cursor-pointer' alt='MentorED' src='"+config.get('EMAIL','logo')+"'></p><div><p>Hello , </p> Please find the User and Session Reports Attachment Links below ...<p><table style='width:50%'><tr><td><b>Mentor User Report</b></td><td><a href='"+mentor_user_presigned_url+"'> click here</a></td></tr><tr><td><b>Mentee User Report</b></td><td><a href='"+mentee_user_presigned_url+"'> click here</a></td></tr><tr><td><b>Session Report</b></td><td><a href='"+session_presigned_url+"'> click here</a></td></tr></table></div><div style='margin-top:100px'><div>Thanks & Regards</div><div>Team MentorED</div><div style='margin-top:20px;color:#b13e33'><div><p>Note:- </p><ul><li>FYI, The Attachment Link shared above will be having the expiry duration. Please use it before expires</li><li>Do not reply to this email. This email is sent from an unattended mailbox. Replies will not be read.</div><div>For any queries, please feel free to reach out to us at "+config.get("EMAIL","supportEmail")+"</li></ul></div></div></div></div>"}}
+# kafka_producer.send(config.get("KAFKA","notification_kafka_topic_name"), json.dumps(email_data, default=json_util.default).encode('utf-8'))
+# kafka_producer.flush()

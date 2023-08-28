@@ -71,3 +71,7 @@ to = {{multiple_to_email_address_by_comma}}
 cc = {{multiple_cc_email_address_by_comma}}
 
 subject = {{email subject}}
+
+logo = {{logo}}
+
+supportEmail = {{support_email}}
