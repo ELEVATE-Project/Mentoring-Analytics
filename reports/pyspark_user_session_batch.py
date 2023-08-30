@@ -188,6 +188,7 @@ users_cursorMongo = users_collec.aggregate(
              "_id": {"$toString": "$_id"},
              "name": 1,
              "isAMentor": 1,
+             "deleted": 1,
              "location": {"_id":{"$toString": "$_id"},"value":1,"label":1},
              "designation":{"_id":{"$toString": "$_id"},"value":1,"label":1},
              "experience":1,
@@ -201,6 +202,7 @@ users_schema = StructType([
     StructField("_id", StringType(), True),
     StructField("name", StringType(), True),
     StructField("isAMentor",BooleanType(),True),
+    StructField("deleted",BooleanType(),True),
     StructField("location",
         ArrayType(
             StructType([StructField("_id",StringType(),True),
@@ -229,16 +231,21 @@ users_df = users_df.withColumn("exploded_location",F.explode_outer(F.col("locati
 
 users_df = users_df.select(F.col("_id").alias("UUID"),
                            F.col("name").alias("User Name"),
+                           F.col("deleted").alias("deleted"),
                            F.col("exploded_location.label").alias("State"),
                            concat_ws(",",F.col("designation.label")).alias("Designation"),
                            F.col("experience").alias("Years_of_Experience"),
                            concat_ws(",",F.col("areasOfExpertise.label")).alias("Areas_of_Expertise")
            )
-mentee_users_df = users_df.select("UUID","User Name","State","Designation","Years_of_Experience")
+mentee_users_df = users_df.select("UUID","User Name","deleted","State","Designation","Years_of_Experience")
 
 mentor_user_sessions_df = mentoru_sessions_df.join(users_df,users_df["UUID"] == mentor_sessions_df["userId"],how="left")\
                 .select(users_df["*"],mentoru_sessions_df["No_of_session_created"],mentoru_sessions_df["No_of_sessions_conducted"])
+
 mentor_user_sessions_df = mentor_user_sessions_df.na.fill(0,subset=["No_of_session_created","No_of_sessions_conducted"])
+
+
+
 
 session_attendees_cursorMongo = session_attendees_collec.aggregate(
         [{"$match": {"deleted": {"$exists":True,"$ne":None}}},
@@ -302,9 +309,6 @@ if (session_attendees_df_fd.count() >=1) :
                              round(avg(F.col("To what extent were you able to learn new skill or concept in the session?")),2).alias("To what extent were you able to learn new skill or concept in the session?"),\
                              round(avg(F.col("To what extent did you feel comfortable sharing your thoughts in the session?")),2).alias("To what extent did you feel comfortable sharing your thoughts in the session?"))
 
-#  session_attendees_df_fd_sr.show()
-
-#  sys.exit()
  session_attendees_df_fd = session_attendees_df_fd.filter(F.col("exploded_feedbacks.label").isin("How would you rate the host of the session?","How would you rate the engagement in the session?"))
  session_attendees_df_fd = session_attendees_df_fd.groupBy("_id","userId","isSessionAttended").pivot("exploded_feedbacks.label")\
                           .agg(F.first("exploded_feedbacks.value"))
@@ -315,6 +319,8 @@ if (session_attendees_df_fd.count() >=1) :
     round(avg(F.col("How would you rate the engagement in the session?")), 2).alias("How would you rate the engagement in the session?")
  )
  
+ 
+
  user_avg_mentor_rating_columns = [F.col("How would you rate the host of the session?"), F.col("How would you rate the engagement in the session?")]
  
  session_attendees_df_fd = session_attendees_df_fd.na.fill(0).withColumn(
@@ -326,6 +332,8 @@ if (session_attendees_df_fd.count() >=1) :
 )
 
 
+
+
  final_mentor_user_sessions_df = mentor_user_sessions_df.join(session_attendees_df_fd,\
                                 mentor_user_sessions_df["UUID"]==session_attendees_df_fd["userId"],how="left")\
                                 .select(mentor_user_sessions_df["*"],session_attendees_df_fd["How would you rate the host of the session?"],\
@@ -334,8 +342,36 @@ if (session_attendees_df_fd.count() >=1) :
  final_mentor_user_sessions_df = final_mentor_user_sessions_df.na.fill(0,subset=["How would you rate the host of the session?",\
                                 "How would you rate the engagement in the session?"])
  
+ 
 # update mentor headers
  final_mentor_user_sessions_df = final_mentor_user_sessions_df.withColumnRenamed("User Name","Mentor Name").withColumnRenamed("How would you rate the host of the session?","Mentor Rating").withColumnRenamed("How would you rate the engagement in the session?","Session Engagement Rating")
+
+
+ #Remove the feedbacks of deleted Mentors 
+ final_mentor_user_sessions_df = final_mentor_user_sessions_df.withColumn(
+     "No_of_session_created",
+     F.when(final_mentor_user_sessions_df["deleted"] == True, "")
+      .otherwise(final_mentor_user_sessions_df["No_of_session_created"])
+ ).withColumn(
+     "No_of_sessions_conducted",
+     F.when(final_mentor_user_sessions_df["deleted"] == True, "")
+      .otherwise(final_mentor_user_sessions_df["No_of_sessions_conducted"])
+ ).withColumn(
+     "Mentor Rating",
+     F.when(final_mentor_user_sessions_df["deleted"] == True, "")
+      .otherwise(final_mentor_user_sessions_df["Mentor Rating"])
+ ).withColumn(
+     "Session Engagement Rating",
+     F.when(final_mentor_user_sessions_df["deleted"] == True, "")
+      .otherwise(final_mentor_user_sessions_df["Session Engagement Rating"])
+ ).withColumn(
+     "Avg_Mentor_rating",
+     F.when(final_mentor_user_sessions_df["deleted"] == True, "")
+      .otherwise(final_mentor_user_sessions_df["Avg_Mentor_rating"])
+ )
+
+ # Remove the column deleted 
+ final_mentor_user_sessions_df = final_mentor_user_sessions_df.drop("deleted")
 
  final_mentor_user_sessions_df.repartition(1).write.format("csv").option("header",True).mode("overwrite").save(
     config.get("S3","mentor_user_path")+"temp/"
@@ -344,9 +380,35 @@ else:
  #  update mentor headers
  mentor_user_sessions_df = mentor_user_sessions_df.withColumnRenamed("User Name","Mentor Name").withColumnRenamed("How would you rate the host of the session?","Mentor Rating").withColumnRenamed("How would you rate the engagement in the session?","Session Engagement Rating")
  
+ #Remove the feedbacks of deleted Mentors
+ mentor_user_sessions_df = mentor_user_sessions_df.withColumn(
+     "No_of_session_created",
+     F.when(mentor_user_sessions_df["deleted"] == True, "")
+      .otherwise(mentor_user_sessions_df["No_of_session_created"])
+ ).withColumn(
+     "No_of_sessions_conducted",
+     F.when(mentor_user_sessions_df["deleted"] == True, "")
+      .otherwise(mentor_user_sessions_df["No_of_sessions_conducted"])
+ ).withColumn(
+     "Mentor Rating",
+     F.when(mentor_user_sessions_df["deleted"] == True, "")
+      .otherwise(mentor_user_sessions_df["Mentor Rating"])
+ ).withColumn(
+     "Session Engagement Rating",
+     F.when(mentor_user_sessions_df["deleted"] == True, "")
+      .otherwise(mentor_user_sessions_df["Session Engagement Rating"])
+ ).withColumn(
+     "Avg_Mentor_rating",
+     F.when(mentor_user_sessions_df["deleted"] == True, "")
+      .otherwise(mentor_user_sessions_df["Avg_Mentor_rating"])
+ )
  mentor_user_sessions_df.repartition(1).write.format("csv").option("header",True).mode("overwrite").save(
     config.get("S3","mentor_user_path")+"temp/"
  )
+
+# Remove the column deleted 
+final_mentor_user_sessions_df = final_mentor_user_sessions_df.drop("deleted")
+
 
 session_attendees_df = session_attendees_df.join(session_attendees_df_fd_sr,session_attendees_df['sessionId']==session_attendees_df_fd_sr['sessionId'],how="left")\
                         .select(session_attendees_df["*"],session_attendees_df_fd_sr["How relevant was the session to your role?"],\
@@ -385,11 +447,38 @@ mentee_user_session_attendees_df = mentee_session_attendees_df.join(mentee_users
                         mentee_session_attendees_df["To what extent were you able to learn new skill or concept in the session?"],\
                         mentee_session_attendees_df["To what extent did you feel comfortable sharing your thoughts in the session?"]
                         )
-mentee_user_session_attendees_df = mentee_user_session_attendees_df.na.fill(0,subset=["No_of_sessions_enrolled",\
-                                   "No_of_sessions_attended"])
+mentee_user_session_attendees_df = mentee_user_session_attendees_df.na.fill(0,subset=["No_of_sessions_enrolled","No_of_sessions_attended"])
+
+mentee_user_session_attendees_df = mentee_user_session_attendees_df.withColumn(
+     "No_of_sessions_enrolled",
+     F.when(mentee_user_session_attendees_df["deleted"] == True, "")
+      .otherwise(mentee_user_session_attendees_df["No_of_sessions_enrolled"])
+ ).withColumn(
+     "No_of_sessions_attended",
+     F.when(mentee_user_session_attendees_df["deleted"] == True, "")
+      .otherwise(mentee_user_session_attendees_df["No_of_sessions_attended"])
+ ).withColumn(
+     "How relevant was the session to your role?",
+     F.when(mentee_user_session_attendees_df["deleted"] == True, "")
+      .otherwise(mentee_user_session_attendees_df["How relevant was the session to your role?"])
+ ).withColumn(
+     "To what extent were you able to learn new skill or concept in the session?",
+     F.when(mentee_user_session_attendees_df["deleted"] == True, "")
+      .otherwise(mentee_user_session_attendees_df["To what extent were you able to learn new skill or concept in the session?"])
+ ).withColumn(
+     "To what extent did you feel comfortable sharing your thoughts in the session?",
+     F.when(mentee_user_session_attendees_df["deleted"] == True, "")
+      .otherwise(mentee_user_session_attendees_df["To what extent did you feel comfortable sharing your thoughts in the session?"])
+ )
 
 # update mentee fields 
 mentee_user_session_attendees_df = mentee_user_session_attendees_df.withColumnRenamed("User Name","Mentee Name").withColumnRenamed("No_of_sessions_enrolled","No. of sessions enrolled in")
+
+
+# Remove the column deleted 
+mentee_user_session_attendees_df = mentee_user_session_attendees_df.drop("deleted")
+
+
 mentee_user_session_attendees_df.repartition(1).write.format("csv").option("header",True).mode("overwrite").save(
     config.get("S3","mentee_user_path")+"temp/"
 )
@@ -413,6 +502,7 @@ final_sessions_df = final_sessions_df.join(users_df, col("Host_UUID") == col("UU
         final_sessions_df["sessionId"],
         final_sessions_df["Host_UUID"],
         users_df["User Name"].alias("Mentor Name"),
+        users_df["deleted"].alias("deleted"),
         final_sessions_df["Time_stamp_of_session_creation"],
         final_sessions_df["Time_stamp_of_session_scheduled"],
         final_sessions_df["Duration_of_session_min"],
@@ -442,6 +532,68 @@ if (session_attendees_df_fd.count() >=1) :
  
  # update sessions headers
  final_sessions_df_sr = final_sessions_df_sr.withColumnRenamed("How would you rate the Audio/Video quality?","Audio/Video quality rating").withColumnRenamed("How would you rate the engagement in the session?","Session Engagement Rating").withColumnRenamed("Host_UUID","Mentor UUID").withColumnRenamed("How would you rate the host of the session?","Mentor Rating")
+ 
+
+ final_sessions_df_sr = final_sessions_df_sr.withColumn(
+     "Time_stamp_of_session_creation",
+     F.when(final_sessions_df_sr["deleted"] == True, "")
+      .otherwise(final_sessions_df_sr["Time_stamp_of_session_creation"])
+ ).withColumn(
+     "Time_stamp_of_session_scheduled",
+     F.when(final_sessions_df_sr["deleted"] == True, "")
+      .otherwise(final_sessions_df_sr["Time_stamp_of_session_scheduled"])
+ ).withColumn(
+     "Duration_of_session_min",
+     F.when(final_sessions_df_sr["deleted"] == True, "")
+      .otherwise(final_sessions_df_sr["Duration_of_session_min"])
+ ).withColumn(
+     "Title_of_the_session",
+     F.when(final_sessions_df_sr["deleted"] == True, "")
+      .otherwise(final_sessions_df_sr["Title_of_the_session"])
+ ).withColumn(
+     "Recommended_for",
+     F.when(final_sessions_df_sr["deleted"] == True, "")
+      .otherwise(final_sessions_df_sr["Recommended_for"])
+ ).withColumn(
+     "Categories",
+     F.when(final_sessions_df_sr["deleted"] == True, "")
+      .otherwise(final_sessions_df_sr["Categories"])
+ ).withColumn(
+     "Languages",
+     F.when(final_sessions_df_sr["deleted"] == True, "")
+      .otherwise(final_sessions_df_sr["Languages"])
+ ).withColumn(
+     "No_of_Mentees_enrolled",
+     F.when(final_sessions_df_sr["deleted"] == True, "")
+      .otherwise(final_sessions_df_sr["No_of_Mentees_enrolled"])
+ ).withColumn(
+     "No_of_Mentees_attended_the_session",
+     F.when(final_sessions_df_sr["deleted"] == True, "")
+      .otherwise(final_sessions_df_sr["No_of_Mentees_attended_the_session"])
+ ).withColumn(
+     "Audio/Video quality rating",
+     F.when(final_sessions_df_sr["deleted"] == True, "")
+      .otherwise(final_sessions_df_sr["Audio/Video quality rating"])
+ ).withColumn(
+     "Session Engagement Rating",
+     F.when(final_sessions_df_sr["deleted"] == True, "")
+      .otherwise(final_sessions_df_sr["Session Engagement Rating"])
+ ).withColumn(
+     "Mentor Rating",
+     F.when(final_sessions_df_sr["deleted"] == True, "")
+      .otherwise(final_sessions_df_sr["Mentor Rating"])
+ ).withColumn(
+     "No_of_Mentees_who_gave_feedback",
+     F.when(final_sessions_df_sr["deleted"] == True, "")
+      .otherwise(final_sessions_df_sr["No_of_Mentees_who_gave_feedback"])
+ )
+ 
+ 
+
+
+ # Remove the column deleted 
+ final_sessions_df_sr = final_sessions_df_sr.drop("deleted")
+ 
 
  final_sessions_df_sr.repartition(1).write.format("csv").option("header",True).mode("overwrite").save(
     config.get("S3","session_path")+"temp/"
@@ -449,6 +601,64 @@ if (session_attendees_df_fd.count() >=1) :
 else:
  # update sessions headers
  final_sessions_df = final_sessions_df.withColumnRenamed("How would you rate the Audio/Video quality?","Audio/Video quality rating").withColumnRenamed("How would you rate the engagement in the session?","Session Engagement Rating").withColumnRenamed("Host_UUID","Mentor UUID").withColumnRenamed("How would you rate the host of the session?","Mentor Rating")
+ final_sessions_df = final_sessions_df.withColumn(
+     "Time_stamp_of_session_creation",
+     F.when(final_sessions_df["deleted"] == True, "")
+      .otherwise(final_sessions_df["Time_stamp_of_session_creation"])
+ ).withColumn(
+     "Time_stamp_of_session_scheduled",
+     F.when(final_sessions_df["deleted"] == True, "")
+      .otherwise(final_sessions_df["Time_stamp_of_session_scheduled"])
+ ).withColumn(
+     "Duration_of_session_min",
+     F.when(final_sessions_df["deleted"] == True, "")
+      .otherwise(final_sessions_df["Duration_of_session_min"])
+ ).withColumn(
+     "Title_of_the_session",
+     F.when(final_sessions_df["deleted"] == True, "")
+      .otherwise(final_sessions_df["Title_of_the_session"])
+ ).withColumn(
+     "Recommended_for",
+     F.when(final_sessions_df["deleted"] == True, "")
+      .otherwise(final_sessions_df["Recommended_for"])
+ ).withColumn(
+     "Categories",
+     F.when(final_sessions_df["deleted"] == True, "")
+      .otherwise(final_sessions_df["Categories"])
+ ).withColumn(
+     "Languages",
+     F.when(final_sessions_df["deleted"] == True, "")
+      .otherwise(final_sessions_df["Languages"])
+ ).withColumn(
+     "No_of_Mentees_enrolled",
+     F.when(final_sessions_df["deleted"] == True, "")
+      .otherwise(final_sessions_df["No_of_Mentees_enrolled"])
+ ).withColumn(
+     "No_of_Mentees_attended_the_session",
+     F.when(final_sessions_df["deleted"] == True, "")
+      .otherwise(final_sessions_df["No_of_Mentees_attended_the_session"])
+ ).withColumn(
+     "Audio/Video quality rating",
+     F.when(final_sessions_df["deleted"] == True, "")
+      .otherwise(final_sessions_df["Audio/Video quality rating"])
+ ).withColumn(
+     "Session Engagement Rating",
+     F.when(final_sessions_df["deleted"] == True, "")
+      .otherwise(final_sessions_df["Session Engagement Rating"])
+ ).withColumn(
+     "Mentor Rating",
+     F.when(final_sessions_df["deleted"] == True, "")
+      .otherwise(final_sessions_df["Mentor Rating"])
+ ).withColumn(
+     "No_of_Mentees_who_gave_feedback",
+     F.when(final_sessions_df_sr["deleted"] == True, "")
+      .otherwise(final_sessions_df_sr["No_of_Mentees_who_gave_feedback"])
+ )
+ 
+
+
+ # Remove the column deleted 
+ final_sessions_df = final_sessions_df.drop("deleted")
  
  final_sessions_df.repartition(1).write.format("csv").option("header",True).mode("overwrite").save(
     config.get("S3","session_path")+"temp/"
