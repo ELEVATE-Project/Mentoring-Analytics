@@ -682,7 +682,6 @@ for f in s3_bucket.objects.filter(Prefix=s3_session_folder  + "temp/"):
     if str(f.key.split('/')[-1]).endswith(".csv"):
      session_fileName = f.key.split('/')[-1]
 
-
 reportPrefix = ""
 if "dev_reports" in s3_session_folder or "dev_reports" in s3_mentor_user_folder or "dev_reports" in s3_mentee_user_folder:
   reportPrefix = "DEV-"
