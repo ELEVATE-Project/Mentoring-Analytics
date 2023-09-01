@@ -692,7 +692,7 @@ else:
 # Copying file to rename 
 source_object = {
     'Bucket': config.get("S3","bucket_name"),
-    'Key': s3_mentor_user_folder+"temp/"+mentorUser_fileName
+    'Key': str(s3_mentor_user_folder)+"temp/"+str(mentorUser_fileName)
 }
 
 destination_object = s3_mentor_user_folder+str(reportPrefix)+"Mentor User Report_"+str(currentDate)+".csv"
@@ -711,7 +711,7 @@ mentor_user_presigned_url = s3_presigned_client.generate_presigned_url(
 # Copying file to rename 
 source_object = {
     'Bucket': config.get("S3","bucket_name"),
-    'Key': s3_mentee_user_folder+"temp/"+menteeUser_fileName
+    'Key': str(s3_mentee_user_folder)+"temp/"+str(menteeUser_fileName)
 }
 
 destination_object = s3_mentee_user_folder+str(reportPrefix)+"Mentee User Report_"+str(currentDate)+".csv"
@@ -729,7 +729,7 @@ mentee_user_presigned_url = s3_presigned_client.generate_presigned_url(
 # Copying file to rename 
 source_object = {
     'Bucket': config.get("S3","bucket_name"),
-    'Key': s3_session_folder+"temp/"+session_fileName
+    'Key': str(s3_session_folder)+"temp/"+str(session_fileName)
 }
 
 destination_object = s3_session_folder+str(reportPrefix)+"Session Report_"+str(currentDate)+".csv"
