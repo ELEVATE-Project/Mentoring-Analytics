@@ -665,20 +665,20 @@ else:
  )
 ##Generating Pre-signed url for all the reports stored in S3
 expiryInSec = config.get("S3","expiryTime")
-s3_session_folder = config.get("S3","s3_session_folder") + "temp/"
-s3_mentor_user_folder = config.get("S3","s3_mentor_user_folder") + "temp/"
-s3_mentee_user_folder = config.get("S3","s3_mentee_user_folder") + "temp/"
+s3_session_folder = config.get("S3","s3_session_folder")
+s3_mentor_user_folder = config.get("S3","s3_mentor_user_folder")
+s3_mentee_user_folder = config.get("S3","s3_mentee_user_folder")
 
 session_fileName = None
 mentorUser_fileName = None
 menteeUser_fileName = None
-for f in s3_bucket.objects.filter(Prefix=s3_mentor_user_folder):
+for f in s3_bucket.objects.filter(Prefix=s3_mentor_user_folder  + "temp/"):
     if str(f.key.split('/')[-1]).endswith(".csv"):
      mentorUser_fileName = f.key.split('/')[-1]
-for f in s3_bucket.objects.filter(Prefix=s3_mentee_user_folder):
+for f in s3_bucket.objects.filter(Prefix=s3_mentee_user_folder  + "temp/"):
     if str(f.key.split('/')[-1]).endswith(".csv"):
      menteeUser_fileName = f.key.split('/')[-1]
-for f in s3_bucket.objects.filter(Prefix=s3_session_folder):
+for f in s3_bucket.objects.filter(Prefix=s3_session_folder  + "temp/"):
     if str(f.key.split('/')[-1]).endswith(".csv"):
      session_fileName = f.key.split('/')[-1]
 
@@ -692,11 +692,12 @@ else:
 # Copying file to rename 
 source_object = {
     'Bucket': config.get("S3","bucket_name"),
-    'Key': s3_mentor_user_folder+mentorUser_fileName
+    'Key': s3_mentor_user_folder+"temp/"+mentorUser_fileName
 }
 
 destination_object = s3_mentor_user_folder+str(reportPrefix)+"Mentor User Report_"+str(currentDate)+".csv"
 copy_source = source_object
+
 
 
 s3_client.meta.client.copy(copy_source,config.get("S3","bucket_name"), destination_object)
@@ -710,7 +711,7 @@ mentor_user_presigned_url = s3_presigned_client.generate_presigned_url(
 # Copying file to rename 
 source_object = {
     'Bucket': config.get("S3","bucket_name"),
-    'Key': s3_mentee_user_folder+menteeUser_fileName
+    'Key': s3_mentee_user_folder+"temp/"+menteeUser_fileName
 }
 
 destination_object = s3_mentee_user_folder+str(reportPrefix)+"Mentee User Report_"+str(currentDate)+".csv"
@@ -728,7 +729,7 @@ mentee_user_presigned_url = s3_presigned_client.generate_presigned_url(
 # Copying file to rename 
 source_object = {
     'Bucket': config.get("S3","bucket_name"),
-    'Key': s3_session_folder+session_fileName
+    'Key': s3_session_folder+"temp/"+session_fileName
 }
 
 destination_object = s3_session_folder+str(reportPrefix)+"Session Report_"+str(currentDate)+".csv"
