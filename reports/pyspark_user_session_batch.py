@@ -121,6 +121,8 @@ mentor_sessions_cursorMongo = sessions_collec.aggregate(
                           "_id": {"$toString": "$_id"},
                           "userId": {"$toString": "$userId"},
                           "status":1,
+                          "isStarted" : 1,
+                          "deleted" : 1,
                           "feedbacks":{"_id":{"$toString": "$_id"},"questionId":{"$toString": "$questionId"},"value":1,"label":1},
                           "createdAt":1,
                           "startDateUtc":1,
@@ -138,6 +140,8 @@ mentor_sessions_schema = StructType([
         StructField("_id", StringType(), True),
         StructField("userId", StringType(), True),
         StructField("status",StringType(),True),
+        StructField("isStarted",StringType(),True),
+        StructField("deleted",StringType(),True),
         StructField("feedbacks",
           ArrayType(
             StructType([
@@ -178,9 +182,17 @@ sessions_df = spark.createDataFrame(mentor_sessions_rdd,mentor_sessions_schema)
 sessions_df = sessions_df.withColumn("startDateUtc_timestamp",to_timestamp(col("startDateUtc")))\
                          .withColumn("endDateUtc_timestamp",to_timestamp(col("endDateUtc")))\
                          .withColumn("Duration_of_session_min",round((col("endDateUtc_timestamp").cast("long") - col("startDateUtc_timestamp").cast("long"))/60))
-mentor_sessions_df = sessions_df.select(F.col("_id").alias("sessionId"),"userId","status","feedbacks")
-mentoru_sessions_df = mentor_sessions_df.groupBy("userId").agg(count(when(F.col("status") == "completed",True))\
-                       .alias("No_of_sessions_conducted"),F.count("sessionId").alias("No_of_session_created"))
+
+mentor_sessions_df = sessions_df.select(F.col("_id").alias("sessionId"),"userId","status","feedbacks","isStarted","deleted")
+
+
+
+mentoru_sessions_df = mentor_sessions_df.groupBy("userId").agg(
+    F.sum(F.when((F.col("status") == "completed") & (F.col("isStarted") == True) & (F.col("deleted") == False), 1).otherwise(0)).alias("No_of_sessions_conducted"),
+    F.count("sessionId").alias("No_of_session_created")
+)
+
+
 users_cursorMongo = users_collec.aggregate(
         [{"$match": {"deleted": {"$exists":True,"$ne":None}}},
          {
@@ -239,12 +251,10 @@ users_df = users_df.select(F.col("_id").alias("UUID"),
            )
 mentee_users_df = users_df.select("UUID","User Name","deleted","State","Designation","Years_of_Experience")
 
-mentor_user_sessions_df = mentoru_sessions_df.join(users_df,users_df["UUID"] == mentor_sessions_df["userId"],how="left")\
+mentor_user_sessions_df = mentoru_sessions_df.join(users_df,users_df["UUID"] == mentor_sessions_df["userId"],how="inner")\
                 .select(users_df["*"],mentoru_sessions_df["No_of_session_created"],mentoru_sessions_df["No_of_sessions_conducted"])
 
 mentor_user_sessions_df = mentor_user_sessions_df.na.fill(0,subset=["No_of_session_created","No_of_sessions_conducted"])
-
-
 
 
 session_attendees_cursorMongo = session_attendees_collec.aggregate(
@@ -425,6 +435,7 @@ mentee_session_attendees_df = session_attendees_df.select(F.col("_id").alias("se
 mentee_session_attendees_agg_df = mentee_session_attendees_df.groupBy("userId").agg(count(when(F.col("isSessionAttended") == True,True))\
                        .alias("No_of_sessions_attended"),F.count("sessionAttendeesId").alias("No_of_sessions_enrolled"),
                         )
+
 
 mentee_session_attendees_agg_df = mentee_session_attendees_agg_df.withColumnRenamed("userId", "menteeUserId")
 
