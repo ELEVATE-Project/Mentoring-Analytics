@@ -427,15 +427,11 @@ session_attendees_df = session_attendees_df.join(session_attendees_df_fd_sr,sess
 
 
 ## Mentee User Report
-mentee_session_attendees_df = session_attendees_df.select(F.col("_id").alias("sessionAttendeesId"),"userId","isSessionAttended","feedbacks",\
-                                                    F.col("How relevant was the session to your role?").alias("How relevant was the session to your role?"),\
-                                                    F.col("To what extent were you able to learn new skill or concept in the session?").alias("To what extent were you able to learn new skill or concept in the session?"),\
-                                                    F.col("To what extent did you feel comfortable sharing your thoughts in the session?").alias("To what extent did you feel comfortable sharing your thoughts in the session?") )
+mentee_session_attendees_df = session_attendees_df.select(F.col("_id").alias("sessionAttendeesId"),"userId","isSessionAttended","feedbacks")
 
 mentee_session_attendees_agg_df = mentee_session_attendees_df.groupBy("userId").agg(count(when(F.col("isSessionAttended") == True,True))\
                        .alias("No_of_sessions_attended"),F.count("sessionAttendeesId").alias("No_of_sessions_enrolled"),
                         )
-
 
 mentee_session_attendees_agg_df = mentee_session_attendees_agg_df.withColumnRenamed("userId", "menteeUserId")
 
@@ -446,17 +442,11 @@ mentee_session_attendees_df = mentee_session_attendees_df.drop("menteeUserId")
 # Group by userId
 mentee_session_attendees_df = mentee_session_attendees_df.groupBy("userId").agg(
     F.first("No_of_sessions_attended").alias("No_of_sessions_attended"),
-    F.first("No_of_sessions_enrolled").alias("No_of_sessions_enrolled"),
-    F.first("How relevant was the session to your role?").alias("How relevant was the session to your role?"),
-    F.first("To what extent were you able to learn new skill or concept in the session?").alias("To what extent were you able to learn new skill or concept in the session?"),
-    F.first("To what extent did you feel comfortable sharing your thoughts in the session?").alias("To what extent did you feel comfortable sharing your thoughts in the session?")
+    F.first("No_of_sessions_enrolled").alias("No_of_sessions_enrolled")
 )
 
 mentee_user_session_attendees_df = mentee_session_attendees_df.join(mentee_users_df,mentee_users_df["UUID"] == mentee_session_attendees_df["userId"],how="left")\
-                .select(mentee_users_df["*"],mentee_session_attendees_df["No_of_sessions_enrolled"],mentee_session_attendees_df["No_of_sessions_attended"],\
-                        mentee_session_attendees_df["How relevant was the session to your role?"],\
-                        mentee_session_attendees_df["To what extent were you able to learn new skill or concept in the session?"],\
-                        mentee_session_attendees_df["To what extent did you feel comfortable sharing your thoughts in the session?"]
+                .select(mentee_users_df["*"],mentee_session_attendees_df["No_of_sessions_enrolled"],mentee_session_attendees_df["No_of_sessions_attended"]
                         )
 mentee_user_session_attendees_df = mentee_user_session_attendees_df.na.fill(0,subset=["No_of_sessions_enrolled","No_of_sessions_attended"])
 
@@ -468,18 +458,6 @@ mentee_user_session_attendees_df = mentee_user_session_attendees_df.withColumn(
      "No_of_sessions_attended",
      F.when(mentee_user_session_attendees_df["deleted"] == True, "")
       .otherwise(mentee_user_session_attendees_df["No_of_sessions_attended"])
- ).withColumn(
-     "How relevant was the session to your role?",
-     F.when(mentee_user_session_attendees_df["deleted"] == True, "")
-      .otherwise(mentee_user_session_attendees_df["How relevant was the session to your role?"])
- ).withColumn(
-     "To what extent were you able to learn new skill or concept in the session?",
-     F.when(mentee_user_session_attendees_df["deleted"] == True, "")
-      .otherwise(mentee_user_session_attendees_df["To what extent were you able to learn new skill or concept in the session?"])
- ).withColumn(
-     "To what extent did you feel comfortable sharing your thoughts in the session?",
-     F.when(mentee_user_session_attendees_df["deleted"] == True, "")
-      .otherwise(mentee_user_session_attendees_df["To what extent did you feel comfortable sharing your thoughts in the session?"])
  )
 
 # update mentee fields 
@@ -537,9 +515,16 @@ if (session_attendees_df_fd.count() >=1) :
                        final_sessions_df["sessionId"] == session_attendees_df_fd_sr["sessionId"],how="left")\
                        .select(final_sessions_df["*"],session_attendees_df_fd_sr["How would you rate the Audio/Video quality?"],\
                        session_attendees_df_fd_sr["How would you rate the engagement in the session?"],\
-                       session_attendees_df_fd_sr["How would you rate the host of the session?"])
+                       session_attendees_df_fd_sr["How would you rate the host of the session?"],\
+                       session_attendees_df_fd_sr["How relevant was the session to your role?"],\
+                       session_attendees_df_fd_sr["To what extent were you able to learn new skill or concept in the session?"],\
+                       session_attendees_df_fd_sr["To what extent did you feel comfortable sharing your thoughts in the session?"])
+
  final_sessions_df_sr = final_sessions_df_sr.na.fill(0,subset=["How would you rate the Audio/Video quality?",\
-                       "How would you rate the engagement in the session?","How would you rate the host of the session?"])
+                       "How would you rate the engagement in the session?","How would you rate the host of the session?",\
+                       "How relevant was the session to your role?",\
+                        "To what extent were you able to learn new skill or concept in the session?",\
+                        "To what extent did you feel comfortable sharing your thoughts in the session?"])
  
  # update sessions headers
  final_sessions_df_sr = final_sessions_df_sr.withColumnRenamed("How would you rate the Audio/Video quality?","Audio/Video quality rating").withColumnRenamed("How would you rate the engagement in the session?","Session Engagement Rating").withColumnRenamed("Host_UUID","Mentor UUID").withColumnRenamed("How would you rate the host of the session?","Mentor Rating")
