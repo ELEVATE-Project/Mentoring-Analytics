@@ -186,7 +186,6 @@ sessions_df = sessions_df.withColumn("startDateUtc_timestamp",to_timestamp(col("
 mentor_sessions_df = sessions_df.select(F.col("_id").alias("sessionId"),"userId","status","feedbacks","isStarted","deleted")
 
 
-
 mentoru_sessions_df = mentor_sessions_df.groupBy("userId").agg(
     F.sum(F.when((F.col("status") == "completed") & (F.col("isStarted") == True) & (F.col("deleted") == False), 1).otherwise(0)).alias("No_of_sessions_conducted"),
     F.count("sessionId").alias("No_of_session_created")
@@ -201,6 +200,7 @@ users_cursorMongo = users_collec.aggregate(
              "name": 1,
              "isAMentor": 1,
              "deleted": 1,
+             "rating" : {"average" : 1},
              "location": {"_id":{"$toString": "$_id"},"value":1,"label":1},
              "designation":{"_id":{"$toString": "$_id"},"value":1,"label":1},
              "experience":1,
@@ -228,6 +228,9 @@ users_schema = StructType([
                 StructField("label",StringType(),True)])
             ),True),
     StructField("experience",StringType(),True),
+     StructField("rating", StructType([
+        StructField("average", IntegerType(), True) 
+    ]), True),
     StructField("areasOfExpertise",
         ArrayType(
             StructType([StructField("_id",StringType(),True),
@@ -238,24 +241,25 @@ users_schema = StructType([
 
 users_rdd = spark.sparkContext.parallelize(list(users_cursorMongo))
 users_df = spark.createDataFrame(users_rdd,users_schema)
-
 users_df = users_df.withColumn("exploded_location",F.explode_outer(F.col("location")))
 
 users_df = users_df.select(F.col("_id").alias("UUID"),
                            F.col("name").alias("User Name"),
                            F.col("deleted").alias("deleted"),
+                           F.col("rating.average").alias("Rating"),
                            F.col("exploded_location.label").alias("State"),
                            concat_ws(",",F.col("designation.label")).alias("Designation"),
                            F.col("experience").alias("Years_of_Experience"),
                            concat_ws(",",F.col("areasOfExpertise.label")).alias("Areas_of_Expertise")
            )
+
 mentee_users_df = users_df.select("UUID","User Name","deleted","State","Designation","Years_of_Experience")
 
 mentor_user_sessions_df = mentoru_sessions_df.join(users_df,users_df["UUID"] == mentor_sessions_df["userId"],how="inner")\
                 .select(users_df["*"],mentoru_sessions_df["No_of_session_created"],mentoru_sessions_df["No_of_sessions_conducted"])
 
-mentor_user_sessions_df = mentor_user_sessions_df.na.fill(0,subset=["No_of_session_created","No_of_sessions_conducted"])
 
+mentor_user_sessions_df = mentor_user_sessions_df.na.fill(0,subset=["No_of_session_created","No_of_sessions_conducted"])
 
 session_attendees_cursorMongo = session_attendees_collec.aggregate(
         [{"$match": {"deleted": {"$exists":True,"$ne":None}}},
@@ -323,26 +327,33 @@ if (session_attendees_df_fd.count() >=1) :
  session_attendees_df_fd = session_attendees_df_fd.groupBy("_id","userId","isSessionAttended").pivot("exploded_feedbacks.label")\
                           .agg(F.first("exploded_feedbacks.value"))
  
+ 
+ mentor_df = mentor_sessions_df.join(session_attendees_df_fd_sr,session_attendees_df_fd_sr["sessionId"] == mentor_sessions_df["sessionId"],how="inner")\
+                .select(mentor_sessions_df["sessionId"]\
+                    ,session_attendees_df_fd_sr["How would you rate the engagement in the session?"],\
+                    session_attendees_df_fd_sr["How would you rate the host of the session?"],\
+                    mentor_sessions_df["userId"])
+ 
+
+ mentor_aggregated_df = mentor_df.groupBy("userId").agg(
+    round(avg(F.col("How would you rate the host of the session?")), 2).alias("How would you rate the host of the session?"),
+    round(avg(F.col("How would you rate the engagement in the session?")), 2).alias("How would you rate the engagement in the session?")
+ )
 
  session_attendees_df_fd = session_attendees_df_fd.groupBy("userId").agg(
     round(avg(F.col("How would you rate the host of the session?")), 2).alias("How would you rate the host of the session?"),
     round(avg(F.col("How would you rate the engagement in the session?")), 2).alias("How would you rate the engagement in the session?")
  )
- 
- 
 
- user_avg_mentor_rating_columns = [F.col("How would you rate the host of the session?"), F.col("How would you rate the engagement in the session?")]
+ mentor_aggregated_df = [F.col("How would you rate the host of the session?"), F.col("How would you rate the engagement in the session?")]
  
  session_attendees_df_fd = session_attendees_df_fd.na.fill(0).withColumn(
     "Avg_Mentor_rating",
     round(
-        reduce(add, [x for x in user_avg_mentor_rating_columns])/len(user_avg_mentor_rating_columns),
+        reduce(add, [x for x in mentor_aggregated_df])/len(mentor_aggregated_df),
         2
     )
 )
-
-
-
 
  final_mentor_user_sessions_df = mentor_user_sessions_df.join(session_attendees_df_fd,\
                                 mentor_user_sessions_df["UUID"]==session_attendees_df_fd["userId"],how="left")\
@@ -354,7 +365,9 @@ if (session_attendees_df_fd.count() >=1) :
  
  
 # update mentor headers
- final_mentor_user_sessions_df = final_mentor_user_sessions_df.withColumnRenamed("User Name","Mentor Name").withColumnRenamed("How would you rate the host of the session?","Mentor Rating").withColumnRenamed("How would you rate the engagement in the session?","Session Engagement Rating")
+ final_mentor_user_sessions_df = final_mentor_user_sessions_df.withColumnRenamed("User Name","Mentor Name")\
+    .withColumnRenamed("How would you rate the host of the session?","Mentor Rating")\
+    .withColumnRenamed("How would you rate the engagement in the session?","Session Engagement Rating")
 
 
  #Remove the feedbacks of deleted Mentors 
@@ -378,6 +391,10 @@ if (session_attendees_df_fd.count() >=1) :
      "Avg_Mentor_rating",
      F.when(final_mentor_user_sessions_df["deleted"] == True, "")
       .otherwise(final_mentor_user_sessions_df["Avg_Mentor_rating"])
+ ).withColumn(
+     "Rating",
+     F.when(final_mentor_user_sessions_df["deleted"] == True, "")
+      .otherwise(final_mentor_user_sessions_df["Rating"])
  )
 
  # Remove the column deleted 
@@ -527,7 +544,10 @@ if (session_attendees_df_fd.count() >=1) :
                         "To what extent did you feel comfortable sharing your thoughts in the session?"])
  
  # update sessions headers
- final_sessions_df_sr = final_sessions_df_sr.withColumnRenamed("How would you rate the Audio/Video quality?","Audio/Video quality rating").withColumnRenamed("How would you rate the engagement in the session?","Session Engagement Rating").withColumnRenamed("Host_UUID","Mentor UUID").withColumnRenamed("How would you rate the host of the session?","Mentor Rating")
+ final_sessions_df_sr = final_sessions_df_sr.withColumnRenamed("How would you rate the Audio/Video quality?","Audio/Video quality rating")\
+    .withColumnRenamed("How would you rate the engagement in the session?","Session Engagement Rating")\
+        .withColumnRenamed("Host_UUID","Mentor UUID")\
+        .withColumnRenamed("How would you rate the host of the session?","Mentor Rating")
  
 
  final_sessions_df_sr = final_sessions_df_sr.withColumn(
