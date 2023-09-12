@@ -78,6 +78,8 @@ spark = SparkSession.builder.appName("user_reports").config(
 
 sc = spark.sparkContext
 
+spark.sparkContext.setLogLevel("WARN")
+
 spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "true")
 hadoop_conf = sc._jsc.hadoopConfiguration()
 hadoop_conf.set("fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
@@ -186,11 +188,15 @@ sessions_df = sessions_df.withColumn("startDateUtc_timestamp",to_timestamp(col("
 mentor_sessions_df = sessions_df.select(F.col("_id").alias("sessionId"),"userId","status","feedbacks","isStarted","deleted")
 
 
+# print("=========================>",mentor_sessions_df.count())
+
 mentoru_sessions_df = mentor_sessions_df.groupBy("userId").agg(
     F.sum(F.when((F.col("status") == "completed") & (F.col("isStarted") == True) & (F.col("deleted") == False), 1).otherwise(0)).alias("No_of_sessions_conducted"),
     F.count("sessionId").alias("No_of_session_created")
 )
 
+# print("=========================>",mentoru_sessions_df.count())
+# sys.exit()
 
 users_cursorMongo = users_collec.aggregate(
         [{"$match": {"deleted": {"$exists":True,"$ne":None}}},
