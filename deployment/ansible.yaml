@@ -5,7 +5,7 @@
   tasks:
     - name: Slurp hosts file
       slurp:
-        src: "/opt/backend/deployment/.token"
+        src: "/opt/token/.token"
       register: slurpfile
     - name: Run vault credentials
       shell: "curl --location --request GET '{{ vaultAddress }}v1/elevate/mentored-portal' --header 'X-Vault-Token: {{ slurpfile['content'] | b64decode }}' | jq '.data' > '{{ project_path }}/data2.json'"
