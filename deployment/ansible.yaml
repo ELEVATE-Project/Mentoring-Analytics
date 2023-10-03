@@ -22,18 +22,10 @@
         force: yes
     - name: Create virtual Environment
       shell: python -m venv ../spark_env
-      debug: 
-        msg: "Virtual Environment created"
     - name: Activate virtual environment
       shell: activate ../spark_env/bin/activate
-      debug: 
-        msg: "Virtual Environment Activated"
     - name: Install requirements
       shell: pip install -r requirement.txt
-      debug: 
-        msg: "Dependencies Installed"
     - name: Job execution
       shell: ./run.sh
-      debug: 
-        msg: "Job executed"
     
