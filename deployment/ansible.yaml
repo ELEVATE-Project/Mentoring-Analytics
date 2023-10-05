@@ -13,7 +13,7 @@
     - name: Change directory
       shell: cd {{project_path}}
     - name: Generate config.ini file
-      shell: python deployment/lib/create_config.py {{ project_path }}/data2.json
+      shell: python3 deployment/lib/create_config.py {{ project_path }}/data2.json
     - name: pull latest code
       git:
         repo: https://github.com/ELEVATE-Project/mentoring-analytics.git
@@ -21,7 +21,7 @@
         version: "{{ gitBranch }}"
         force: yes
     - name: Create virtual Environment
-      shell: python -m venv ../spark_env
+      shell: python3 -m venv ../spark_env
     - name: Activate virtual environment
       shell: activate ../spark_env/bin/activate
     - name: Install requirements
