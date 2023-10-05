@@ -1,7 +1,7 @@
-import json
+import json , sys
 
 # Specify the file path
-file_path = "/Users/adithyadinesh/Documents/shikshalokam/Data_Engineering/ELEVATE-Project/mentoring-analytics/deployment/lib/config.json"
+file_path =  sys.argv[1]
 configFile = "config.ini"
 # Open the file for reading
 with open(file_path, "r") as json_file:
