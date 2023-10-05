@@ -1,7 +1,7 @@
 ---
 - hosts: validation
   vars:
-    project_path: /opt/analytics/Mentoring-Analytics
+    project_path: /opt/analytics/mentoring-analytics
   tasks:
     - name: Slurp hosts file
       slurp:
